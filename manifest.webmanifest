@@ -1,0 +1,9 @@
+{
+  "name": "ふたり精算",
+  "short_name": "ふたり精算",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#f4f5f8",
+  "theme_color": "#2f6fed",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}

@@ -1,0 +1,15 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 共有コード（households のドキュメントID）を知っている端末だけが読み書きできる。
+    // 一覧取得（list）を禁止しているので、コードを総当たりで探すことはできない。
+    match /households/{hid} {
+      allow get, create, update: if request.auth != null && hid.size() == 29;
+      allow list, delete: if false;
+
+      match /{kind}/{id} {
+        allow read, write: if request.auth != null && kind in ['payments', 'settlements'];
+      }
+    }
+  }
+}

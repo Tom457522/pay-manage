@@ -167,10 +167,14 @@
       </div>
 
       <div class="card">
-        <h2>ふたりの負担</h2>
-        <div id="m-split" class="split-bar" role="img"></div>
-        <div id="m-split-legend" class="split-legend"></div>
-        <table class="mtable" id="m-burden"></table>
+        <h2>誰が・誰のために払ったか</h2>
+        <div id="m-matrix" class="matrix"></div>
+        <p class="muted small matrix-hint">マスをタップすると、その記録だけを下に表示します。</p>
+      </div>
+
+      <div class="card">
+        <h2>清算額の計算</h2>
+        <div id="m-calc" class="calc"></div>
         <div id="m-settle" class="m-settle"></div>
       </div>
 
@@ -182,7 +186,10 @@
         <div id="m-breakdown" class="hbars"></div>
       </div>
 
-      <h2 class="section-title">この月の記録</h2>
+      <div class="row between section-title">
+        <h2 id="m-list-title" style="margin:0">この月の記録</h2>
+        <button id="m-list-clear" class="btn tiny" hidden>絞り込み解除</button>
+      </div>
       <div id="m-list" class="list"></div>
     </section>
 

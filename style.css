@@ -245,17 +245,6 @@ textarea { resize: vertical; font: inherit; line-height: 1.5; }
 .delta { margin-left: 8px; }
 .delta.up { color: var(--danger); }
 .delta.down { color: var(--both); }
-.split-bar { display: flex; gap: 2px; height: 14px; margin: 4px 0 10px; }
-.split-bar > div { min-width: 4px; }
-.split-bar > div:first-child { border-radius: 4px 0 0 4px; }
-.split-bar > div:last-child { border-radius: 0 4px 4px 0; }
-.split-bar > div:only-child { border-radius: 4px; }
-.seg-a { background: var(--a); }
-.seg-both { background: var(--both); }
-.seg-b { background: var(--b); }
-.split-legend { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 8px; font-size: 12px; }
-.split-legend > div { display: flex; flex-direction: column; }
-.split-legend strong { font-size: 15px; font-variant-numeric: tabular-nums; }
 .seg.mini { margin: 0; gap: 4px; }
 .seg.mini button { padding: 4px 9px; font-size: 12px; flex: none; min-width: 0; }
 
@@ -265,3 +254,37 @@ textarea { resize: vertical; font: inherit; line-height: 1.5; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 3s; } }
 [hidden] { display: none !important; }
+
+/* 6分類マトリクス */
+.mx-grid { display: grid; grid-template-columns: 4.2em repeat(3, minmax(0, 1fr)); gap: 4px; }
+.mx-col { font-size: 12px; color: var(--muted); text-align: center; padding-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mx-row { font-size: 12px; line-height: 1.35; color: var(--muted); display: flex; flex-direction: column; justify-content: center; }
+.mx-row small { color: var(--text); font-size: 11px; font-variant-numeric: tabular-nums; margin-top: 2px; }
+.mx-row > span { white-space: nowrap; }
+.mx-row .a-text, .mx-row .b-text { font-weight: 700; }
+.mx-sum { text-align: left; }
+.mx-total { text-align: center; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; padding-top: 4px; border-top: 1px solid var(--border); }
+.mx-cell {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 1px; min-width: 0;
+  padding: 8px 7px; border-radius: 10px; border: 1px solid transparent; text-align: left;
+  font: inherit; color: var(--text); cursor: pointer;
+}
+.mx-cell.o-a { background: var(--a-soft); }
+.mx-cell.o-shared { background: var(--both-soft); }
+.mx-cell.o-b { background: var(--b-soft); }
+.mx-cell.self { background: var(--bg); }
+.mx-cell:disabled { cursor: default; opacity: .5; }
+.mx-cell.on { border-color: var(--text); box-shadow: 0 0 0 1px var(--text) inset; }
+.mx-no { font-size: 11px; color: var(--muted); }
+.mx-amt { font-size: clamp(13px, 3.8vw, 15px); font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mx-note { font-size: 11px; color: var(--muted); line-height: 1.35; white-space: nowrap; }
+.matrix-hint { margin: 10px 0 0; }
+
+/* 清算額の計算 */
+.calc-dir { margin-bottom: 6px; }
+.calc-line { display: grid; grid-template-columns: 1.4em 1fr auto; align-items: baseline; gap: 6px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+.calc-line.zero { color: var(--muted); }
+.calc-v { font-variant-numeric: tabular-nums; font-weight: 700; white-space: nowrap; }
+.calc-line.zero .calc-v { font-weight: 400; }
+.calc-result { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding-top: 10px; font-size: 14px; }
+.calc-result strong { font-size: 18px; font-variant-numeric: tabular-nums; }

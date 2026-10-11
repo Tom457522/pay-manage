@@ -290,36 +290,12 @@ function renderMonthly() {
       <div class="bar" style="height:${(totals[i] / max) * 100}%"></div>
     </button>`).join('');
   $('#m-trend-labels').innerHTML = months.map((m) => `<span class="${m === ym ? 'on' : ''}">${Number(m.slice(5))}月</span>`).join('');
-  trend.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => { curMonth = b.dataset.m; renderMonthly(); }));
+  trend.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => { curMonth = b.dataset.m; mCell = null; renderMonthly(); }));
 
-  // ふたりの負担（清算済み・未清算を問わずこの月の全記録）
-  const t = { a: 0, b: 0, ownA: 0, ownB: 0, shared: 0, paidA: 0, paidB: 0 };
-  for (const p of list) {
-    const bd = burden(p);
-    const sp = split(p);
-    t.a += bd.a; t.b += bd.b;
-    t.ownA += sp.a; t.ownB += sp.b; t.shared += sp.shared;
-    if (p.payer === 'a') t.paidA += Number(p.total) || 0;
-    else t.paidB += Number(p.total) || 0;
-  }
-  const segs = [['a', `${name('a')}のもの`, t.ownA], ['both', '共有', t.shared], ['b', `${name('b')}のもの`, t.ownB]];
-  const sum = t.ownA + t.shared + t.ownB;
-  const bar = $('#m-split');
-  bar.innerHTML = sum ? segs.filter((x) => x[2] > 0).map(([k, label, v]) =>
-    `<div class="seg-${k}" style="flex-grow:${v}" title="${esc(label)}：${yen(v)}（${Math.round((v / sum) * 100)}%）"></div>`).join('') : '';
-  bar.hidden = !sum;
-  bar.setAttribute('aria-label', segs.map(([, label, v]) => `${label} ${yen(v)}`).join('、'));
-  $('#m-split-legend').innerHTML = sum ? segs.map(([k, label, v]) => `
-    <div><span class="dot ${k}"></span><span class="muted">${esc(label)}</span><strong>${yen(v)}</strong></div>`).join('') : '';
-
-  const diffA = t.paidA - t.a;
-  const row = (label, a, b, cls = '') => `<tr class="${cls}"><td>${label}</td><td>${a}</td><td>${b}</td></tr>`;
-  const signed = (n) => n === 0 ? '±0' : (n > 0 ? '+' : '−') + yen(Math.abs(n)).slice(1);
-  $('#m-burden').innerHTML = !list.length ? '' : `
-    <tr><th></th><th><span class="dot a"></span>${esc(name('a'))}</th><th><span class="dot b"></span>${esc(name('b'))}</th></tr>
-    ${row('負担すべき額', yen(t.a), yen(t.b), 'strong')}
-    ${row('実際に払った額', yen(t.paidA), yen(t.paidB))}
-    ${row('払いすぎ(+)/不足(−)', signed(diffA), signed(-diffA))}`;
+  // 6分類（払った人 × 誰のためか）。清算済み・未清算を問わずこの月の全記録
+  const cells = sixCells(list);
+  renderMatrix(cells);
+  renderCalc(cells);
 
   // この月の清算
   const open = list.filter((p) => !p.settled);
@@ -347,7 +323,101 @@ function renderMonthly() {
   }
   hbars($('#m-breakdown'), top, 'この月の記録はありません');
 
-  renderEntries($('#m-list'), [...list].sort(byDateDesc), 'この月の記録はありません');
+  const c = mCell && CELLS.find((x) => x.key === mCell);
+  const shown = c ? list.filter((p) => p.payer === c.payer && split(p)[c.owner] > 0) : list;
+  $('#m-list-title').textContent = c ? `${c.no} ${cellTitle(c)}` : 'この月の記録';
+  $('#m-list-clear').hidden = !c;
+  renderEntries($('#m-list'), [...shown].sort(byDateDesc), c ? 'この分類の記録はありません' : 'この月の記録はありません');
+}
+
+// ===== 6分類 =====
+// 払った人（a/b）× 誰のためか（a/shared/b）。番号は ①夫→夫 ②夫→共有 ③夫→妻 ④妻→夫 ⑤妻→共有 ⑥妻→妻
+const CELLS = [
+  { key: 'a-a', no: '①', payer: 'a', owner: 'a' },
+  { key: 'a-shared', no: '②', payer: 'a', owner: 'shared' },
+  { key: 'a-b', no: '③', payer: 'a', owner: 'b' },
+  { key: 'b-a', no: '④', payer: 'b', owner: 'a' },
+  { key: 'b-shared', no: '⑤', payer: 'b', owner: 'shared' },
+  { key: 'b-b', no: '⑥', payer: 'b', owner: 'b' },
+];
+let mCell = null; // 絞り込み中の分類
+
+const ownerLabel = (o) => (o === 'shared' ? 'ふたり' : name(o));
+function cellTitle(c) {
+  if (c.owner === c.payer) return `${name(c.payer)}が自分のために`;
+  return `${name(c.payer)}が${ownerLabel(c.owner)}のために`;
+}
+
+// 各マスの金額・件数と、相手に立て替えた額（lent）を出す。
+// 共有分は burden() と同じ割合・丸めで相手の負担分を求めるので、lent の合計は清算額と一致する。
+function sixCells(list) {
+  const out = Object.fromEntries(CELLS.map((c) => [c.key, { ...c, amount: 0, count: 0, lent: 0 }]));
+  for (const p of list) {
+    const payer = p.payer === 'b' ? 'b' : 'a';
+    const other = payer === 'a' ? 'b' : 'a';
+    const sp = split(p);
+    const bd = burden(p);
+    for (const owner of ['a', 'shared', 'b']) {
+      if (!sp[owner]) continue;
+      const cell = out[`${payer}-${owner}`];
+      cell.amount += sp[owner];
+      cell.count++;
+      if (owner === other) cell.lent += sp[owner];
+      if (owner === 'shared') cell.lent += bd[other] - sp[other];
+    }
+  }
+  return out;
+}
+
+function renderMatrix(cells) {
+  const cols = ['a', 'shared', 'b'];
+  const colHead = (o) => `<div class="mx-col"><span class="dot ${o === 'shared' ? 'both' : o}"></span>${esc(o === 'shared' ? 'ふたり用' : name(o) + '用')}</div>`;
+  const cellHtml = (c) => {
+    const note = c.payer === c.owner ? '清算なし'
+      : c.owner === 'shared' ? `${esc(name(c.payer === 'a' ? 'b' : 'a'))}分 ${yen(c.lent)}`
+      : '全額立替';
+    return `<button class="mx-cell o-${c.owner}${c.payer === c.owner ? ' self' : ''}${mCell === c.key ? ' on' : ''}" data-cell="${c.key}"
+        aria-label="${c.no} ${esc(cellTitle(c))} ${yen(c.amount)} ${c.count}件" ${c.count ? '' : 'disabled'}>
+      <span class="mx-no">${c.no}</span>
+      <span class="mx-amt">${yen(c.amount)}</span>
+      <span class="mx-note">${c.count ? `${c.count}件<br>${note}` : '—'}</span>
+    </button>`;
+  };
+  const rowTotal = (payer) => cols.reduce((x, o) => x + cells[`${payer}-${o}`].amount, 0);
+  const colTotal = (o) => cells[`a-${o}`].amount + cells[`b-${o}`].amount;
+  const el = $('#m-matrix');
+  el.innerHTML = `
+    <div class="mx-grid">
+      <div></div>${cols.map(colHead).join('')}
+      ${['a', 'b'].map((payer) => `
+        <div class="mx-row"><span><span class="${payer}-text">${esc(name(payer))}</span>が</span>払った<small>${yen(rowTotal(payer))}</small></div>
+        ${cols.map((o) => cellHtml(cells[`${payer}-${o}`])).join('')}`).join('')}
+      <div class="mx-row mx-sum">計</div>${cols.map((o) => `<div class="mx-total">${yen(colTotal(o))}</div>`).join('')}
+    </div>`;
+  el.querySelectorAll('[data-cell]').forEach((b) => b.addEventListener('click', () => {
+    mCell = mCell === b.dataset.cell ? null : b.dataset.cell;
+    renderMonthly();
+    if (mCell) $('#m-list-title').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }));
+}
+
+// 清算額 = ②の相手分 + ③ − ⑤の相手分 − ④（b → a 向きを正とする）
+function renderCalc(cells) {
+  const A = esc(name('a')), B = esc(name('b'));
+  const lines = [
+    ['②', `${A}が払った共有のうち${B}の分`, cells['a-shared'].lent, 1],
+    ['③', `${A}が払った${B}のもの`, cells['a-b'].lent, 1],
+    ['⑤', `${B}が払った共有のうち${A}の分`, cells['b-shared'].lent, -1],
+    ['④', `${B}が払った${A}のもの`, cells['b-a'].lent, -1],
+  ];
+  const net = lines.reduce((x, [, , v, sign]) => x + v * sign, 0);
+  const any = lines.some(([, , v]) => v);
+  $('#m-calc').innerHTML = `
+    <div class="calc-dir muted small">${B} → ${A} に払う向きをプラスとして計算</div>
+    ${lines.map(([no, label, v, sign]) => `
+      <div class="calc-line${v ? '' : ' zero'}"><span class="mx-no">${no}</span><span class="calc-label">${label}</span>
+        <span class="calc-v ${sign > 0 ? 'plus' : 'minus'}">${sign > 0 ? '+' : '−'}${yen(v)}</span></div>`).join('')}
+    <div class="calc-result"><span>この月の清算額</span><strong>${any ? transferHtml(net) : '—'}</strong></div>`;
 }
 
 // ===== 追加・編集 =====
@@ -1141,8 +1211,9 @@ document.querySelectorAll('.tabbar button').forEach((b) => b.addEventListener('c
   if (b.dataset.view === 'edit') openEdit(null);
   else show(b.dataset.view);
 }));
-$('#m-prev').addEventListener('click', () => { curMonth = shiftMonth(curMonth, -1); renderMonthly(); });
-$('#m-next').addEventListener('click', () => { curMonth = shiftMonth(curMonth, 1); renderMonthly(); });
+$('#m-prev').addEventListener('click', () => { curMonth = shiftMonth(curMonth, -1); mCell = null; renderMonthly(); });
+$('#m-next').addEventListener('click', () => { curMonth = shiftMonth(curMonth, 1); mCell = null; renderMonthly(); });
+$('#m-list-clear').addEventListener('click', () => { mCell = null; renderMonthly(); });
 $('#history-filter').addEventListener('change', renderHistory);
 $('#photo-input').addEventListener('change', (e) => onPhoto(e.target.files[0]));
 $('#camera-input').addEventListener('change', (e) => onPhoto(e.target.files[0]));

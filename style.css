@@ -88,7 +88,7 @@ main { max-width: 640px; margin: 0 auto; padding: 16px; }
 .btn.tiny { padding: 4px 10px; font-size: 13px; }
 
 .form label, label.block { display: block; font-size: 13px; color: var(--muted); margin-bottom: 12px; }
-input[type=text], input[type=number], input[type=date], input[type=password], select {
+input[type=text], input[type=number], input[type=date], input[type=password], select, textarea {
   display: block; width: 100%; margin-top: 4px; padding: 10px 12px; font-size: 16px;
   border: 1px solid var(--border); border-radius: 10px; background: var(--bg); color: var(--text);
   font-family: inherit;
@@ -228,3 +228,6 @@ select { width: auto; margin: 0; }
 .item .imp-head .amount { font-weight: 700; white-space: nowrap; }
 .imp-note { font-size: 12px; color: var(--muted); margin: -4px 0 6px; }
 .imp-actions { margin-top: 16px; }
+textarea { resize: vertical; font: inherit; line-height: 1.5; }
+.imp-ai { font-size: 12px; color: var(--muted); margin-top: 6px; }
+#imp-status { white-space: pre-line; }

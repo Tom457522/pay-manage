@@ -113,6 +113,10 @@
         <div class="seg" id="imp-payer"></div>
         <label class="btn primary full">CSV ファイルを選ぶ<input type="file" id="csv-input" accept=".csv,text/csv,text/comma-separated-values" hidden></label>
         <div id="imp-status" class="muted small status"></div>
+        <div class="row gap" id="imp-ai-row" hidden>
+          <button id="btn-imp-ai" class="btn grow">🤖 AIで振り分け直す</button>
+          <button id="btn-imp-rules" class="btn small">ルール</button>
+        </div>
       </div>
       <div id="imp-bulk" class="row gap small-gap bulk" hidden>
         <span class="muted small">一括：</span>
@@ -210,6 +214,11 @@
         <p class="muted small">Anthropic の API キーを設定すると、Claude がレシートを品目ごとに読み取ります。キーはこの端末のブラウザ内にだけ保存されます。</p>
         <label>API キー<input type="password" id="s-apikey" placeholder="sk-ant-..." autocomplete="off"></label>
         <label>モデル<input type="text" id="s-model"></label>
+      </div>
+      <div class="card form">
+        <h2>AI振り分けルール</h2>
+        <p class="muted small">PayPay の履歴を取り込んだとき、このルールに沿って AI が負担者（または除外）を自動で選びます。ふたりの端末で共有されます。空欄なら過去の記録だけを参考にします。</p>
+        <label>ルール<textarea id="s-rules" rows="7" placeholder="例：&#10;・スーパー、ドラッグストア、コンビニは共有&#10;・ユニクロ、美容院は夫&#10;・カフェで1,000円未満は払った人のもの&#10;・送金は除外"></textarea></label>
       </div>
       <div class="card form">
         <h2>データの共有・バックアップ</h2>

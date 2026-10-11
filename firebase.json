@@ -1,0 +1,4 @@
+{
+  "firestore": { "rules": "firestore.rules", "location": "asia-northeast1" },
+  "auth": { "providers": { "anonymous": true } }
+}

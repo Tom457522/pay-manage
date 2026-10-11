@@ -114,6 +114,7 @@ select { width: auto; margin: 0; }
   overflow: hidden; color: var(--muted);
 }
 .photo-drop img { max-width: 100%; max-height: 260px; display: block; }
+.photo-buttons { margin-bottom: 10px; }
 .status { min-height: 20px; margin-top: 8px; }
 
 /* 仕分けカード */

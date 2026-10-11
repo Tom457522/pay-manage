@@ -42,10 +42,14 @@
         <h2 id="edit-title">支払いを記録</h2>
 
         <label class="photo-drop" id="photo-drop">
-          <input type="file" id="photo-input" accept="image/*" capture="environment" hidden>
+          <input type="file" id="photo-input" accept="image/*" hidden>
           <img id="photo-preview" alt="" hidden>
-          <span id="photo-placeholder">📷 レシートを撮影 / 選択</span>
+          <span id="photo-placeholder">🖼 タップして写真フォルダから選択</span>
         </label>
+        <div class="row gap photo-buttons">
+          <label class="btn grow">📷 撮影する<input type="file" id="camera-input" accept="image/*" capture="environment" hidden></label>
+          <label class="btn grow" for="photo-input">🖼 写真から選ぶ</label>
+        </div>
         <div class="row gap">
           <button id="btn-ai" class="btn primary grow" disabled>AIで読み取る</button>
           <button id="btn-ocr" class="btn grow" disabled>簡易OCR</button>

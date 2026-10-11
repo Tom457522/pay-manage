@@ -301,6 +301,7 @@ function openEdit(id) {
   $('#photo-preview').hidden = true;
   $('#photo-placeholder').hidden = false;
   $('#photo-input').value = '';
+  $('#camera-input').value = '';
   $('#btn-ai').disabled = $('#btn-ocr').disabled = true;
   $('#ocr-status').textContent = '';
   $('#edit-title').textContent = p ? '記録を編集' : '支払いを記録';
@@ -426,7 +427,7 @@ async function onPhoto(file) {
   try {
     photoDataUrl = await downscale(file, 1600);
   } catch {
-    toast('画像を読み込めませんでした');
+    toast('画像を読み込めませんでした（HEIC の場合は JPEG で保存した写真を選んでください）');
     return;
   }
   $('#photo-preview').src = photoDataUrl;
@@ -438,13 +439,30 @@ async function onPhoto(file) {
 }
 
 async function downscale(file, maxSide) {
-  const bmp = await createImageBitmap(file);
+  const bmp = await loadImage(file);
   const scale = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
   const c = document.createElement('canvas');
   c.width = Math.round(bmp.width * scale);
   c.height = Math.round(bmp.height * scale);
   c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
   return c.toDataURL('image/jpeg', 0.85);
+}
+
+// createImageBitmap が扱えない形式（Safari の HEIC など）は <img> 経由で読み込む
+async function loadImage(file) {
+  try {
+    return await createImageBitmap(file);
+  } catch {
+    const url = URL.createObjectURL(file);
+    try {
+      const img = new Image();
+      img.src = url;
+      await img.decode();
+      return img;
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
 }
 
 // 読み取り結果をフォームに反映
@@ -749,6 +767,7 @@ $('#m-prev').addEventListener('click', () => { curMonth = shiftMonth(curMonth, -
 $('#m-next').addEventListener('click', () => { curMonth = shiftMonth(curMonth, 1); renderMonthly(); });
 $('#history-filter').addEventListener('change', renderHistory);
 $('#photo-input').addEventListener('change', (e) => onPhoto(e.target.files[0]));
+$('#camera-input').addEventListener('change', (e) => onPhoto(e.target.files[0]));
 $('#btn-ai').addEventListener('click', aiRead);
 $('#btn-ocr').addEventListener('click', ocrRead);
 $('#f-total').addEventListener('input', updateSummary);

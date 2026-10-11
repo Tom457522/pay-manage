@@ -87,11 +87,11 @@ function split(p) {
   return { a, b, shared: total - a - b };
 }
 
-// 未清算分の集計。net > 0 なら b → a に支払う。
-function summary() {
+// 記録の集計（既定は未清算の全記録）。net > 0 なら b → a に支払う。
+const unsettled = () => livePayments().filter((p) => !p.settled);
+function summary(list = unsettled()) {
   const s = { paidA: 0, paidB: 0, burdenA: 0, burdenB: 0, net: 0, count: 0 };
-  for (const p of livePayments()) {
-    if (p.settled) continue;
+  for (const p of list) {
     const bd = burden(p);
     s.count++;
     s.burdenA += bd.a;
@@ -115,21 +115,44 @@ function show(view) {
 }
 
 // ===== ホーム =====
+// 「誰が誰にいくら払うか」を1行で
+function transferHtml(net) {
+  const amt = Math.abs(net);
+  if (amt === 0) return '差額なし';
+  const [from, to] = net > 0 ? ['b', 'a'] : ['a', 'b'];
+  return `<span class="${from}-text">${esc(name(from))}</span> → <span class="${to}-text">${esc(name(to))}</span> ${yen(amt)}`;
+}
+
+// 未清算の記録を月ごとにまとめる（新しい月が先）
+function unsettledByMonth() {
+  const m = new Map();
+  for (const p of unsettled()) {
+    const ym = (p.date || '').slice(0, 7);
+    if (!m.has(ym)) m.set(ym, []);
+    m.get(ym).push(p);
+  }
+  return [...m.entries()].sort((x, y) => y[0].localeCompare(x[0])).map(([ym, list]) => ({ ym, list, s: summary(list) }));
+}
+
 function renderHome() {
   const s = summary();
-  const amt = Math.abs(s.net);
   if (s.count === 0) {
     $('#balance-text').textContent = '未清算の記録はありません';
     $('#balance-detail').textContent = '';
-  } else if (amt === 0) {
-    $('#balance-text').textContent = '差額なし 🎉';
-    $('#balance-detail').textContent = `${s.count}件の記録`;
   } else {
-    const [from, to] = s.net > 0 ? ['b', 'a'] : ['a', 'b'];
-    $('#balance-text').innerHTML = `<span class="${from}-text">${esc(name(from))}</span> → <span class="${to}-text">${esc(name(to))}</span>　${yen(amt)}`;
+    $('#balance-text').innerHTML = s.net === 0 ? '差額なし 🎉' : transferHtml(s.net);
     $('#balance-detail').textContent = `${s.count}件の記録から計算`;
   }
-  $('#btn-settle').disabled = s.count === 0;
+  const months = unsettledByMonth();
+  $('#settle-months').innerHTML = months.length < 1 ? '' : `
+    <div class="muted small settle-head">月ごとに清算</div>
+    ${months.map(({ ym, s: ms }) => `
+      <div class="settle-row">
+        <div class="settle-month"><strong>${monthLabel(ym)}</strong><span class="muted small">${ms.count}件</span></div>
+        <div class="settle-amt">${transferHtml(ms.net)}</div>
+        <button class="btn small primary" data-settle="${ym}">清算</button>
+      </div>`).join('')}`;
+  $('#settle-months').querySelectorAll('[data-settle]').forEach((b) => b.addEventListener('click', () => settle(b.dataset.settle)));
   $('#paid-a').textContent = `${name('a')} ${yen(s.paidA)}`;
   $('#paid-b').textContent = `${name('b')} ${yen(s.paidB)}`;
   $('#burden-a').textContent = `${name('a')} ${yen(s.burdenA)}`;
@@ -139,24 +162,27 @@ function renderHome() {
   renderEntries($('#recent-list'), recent, 'まだ記録がありません。「記録」から追加しましょう。');
 }
 
-function settle() {
-  const s = summary();
+// 指定した月（YYYY-MM）の未清算の記録を清算済みにする
+function settle(ym) {
+  const list = unsettled().filter((p) => (p.date || '').startsWith(ym));
+  if (!list.length) return;
+  const s = summary(list);
   const amt = Math.abs(s.net);
   const [from, to] = s.net >= 0 ? ['b', 'a'] : ['a', 'b'];
   const msg = amt === 0
-    ? `${s.count}件を清算済みにしますか？`
-    : `${name(from)} → ${name(to)} に ${yen(amt)} 支払ったものとして、${s.count}件を清算済みにしますか？`;
+    ? `${monthLabel(ym)}の${s.count}件を清算済みにしますか？`
+    : `${monthLabel(ym)}分として ${name(from)} → ${name(to)} に ${yen(amt)} 支払ったものとして、${s.count}件を清算済みにしますか？`;
   if (!confirm(msg)) return;
-  const ids = livePayments().filter((p) => !p.settled).map((p) => p.id);
+  const ids = list.map((p) => p.id);
   const now = Date.now();
   data.payments.forEach((p) => { if (ids.includes(p.id)) { p.settled = true; p.updatedAt = now; } });
-  const st = { id: uid(), date: today(), from, to, amount: amt, paymentIds: ids, updatedAt: now };
+  const st = { id: uid(), date: today(), month: ym, from, to, amount: amt, paymentIds: ids, updatedAt: now };
   data.settlements.push(st);
   save();
   push('payments', data.payments.filter((p) => ids.includes(p.id)));
   push('settlements', [st]);
-  toast('清算しました');
-  renderHome();
+  toast(`${monthLabel(ym)}分を清算しました`);
+  refreshView();
 }
 
 // ===== 履歴 =====
@@ -186,7 +212,7 @@ function renderHistory() {
   const el = $('#settlement-list');
   if (!sts.length) { el.innerHTML = '<div class="empty">まだ清算していません</div>'; return; }
   el.innerHTML = sts.map((s) => `<div class="entry" style="cursor:default">
-      <div><div class="title">${esc(s.date)}</div><div class="meta">${s.paymentIds.length}件を清算</div></div>
+      <div><div class="title">${s.month ? monthLabel(s.month) + '分' : esc(s.date)}</div><div class="meta">${s.month ? esc(s.date) + '・' : ''}${s.paymentIds.length}件を清算</div></div>
       <div class="amount">${esc(name(s.from))} → ${esc(name(s.to))} ${yen(s.amount)}
         <div><button class="btn tiny" data-undo="${s.id}">取り消す</button></div></div>
     </div>`).join('');
@@ -240,6 +266,9 @@ function groupSum(list, keyFn) {
   return [...m.values()].sort((x, y) => y.value - x.value);
 }
 
+let mTab = 'store';
+const M_TABS = [['store', 'お店'], ['method', '支払い方法'], ['payer', '払った人']];
+
 function renderMonthly() {
   const ym = curMonth;
   const list = inMonth(ym);
@@ -249,29 +278,7 @@ function renderMonthly() {
   $('#m-total').textContent = yen(total);
   const prev = monthTotal(shiftMonth(ym, -1));
   const diff = prev ? Math.round(((total - prev) / prev) * 100) : null;
-  $('#m-sub').textContent = `${list.length}件` + (diff === null ? '' : `・前月比 ${diff >= 0 ? '+' : ''}${diff}%`);
-
-  // 負担の内訳（清算済み・未清算を問わずこの月の全記録）
-  const t = { a: 0, b: 0, ownA: 0, ownB: 0, sharedA: 0, sharedB: 0, paidA: 0, paidB: 0 };
-  for (const p of list) {
-    const bd = burden(p);
-    const sp = split(p);
-    t.a += bd.a; t.b += bd.b;
-    t.ownA += sp.a; t.ownB += sp.b;
-    t.sharedA += bd.a - sp.a; t.sharedB += bd.b - sp.b;
-    if (p.payer === 'a') t.paidA += Number(p.total) || 0;
-    else t.paidB += Number(p.total) || 0;
-  }
-  const row = (label, a, b, cls = '') => `<tr class="${cls}"><td>${label}</td><td>${yen(a)}</td><td>${yen(b)}</td></tr>`;
-  $('#m-burden').innerHTML = `
-    <tr><th></th><th><span class="dot a"></span>${esc(name('a'))}</th><th><span class="dot b"></span>${esc(name('b'))}</th></tr>
-    ${row('負担合計', t.a, t.b, 'strong')}
-    ${row('　個人のもの', t.ownA, t.ownB)}
-    ${row('　共有の負担分', t.sharedA, t.sharedB)}
-    ${row('実際に払った額', t.paidA, t.paidB)}`;
-
-  hbars($('#m-methods'), groupSum(list, (p) => METHODS[p.method] || 'その他'), 'この月の記録はありません');
-  hbars($('#m-stores'), groupSum(list, (p) => p.store || '（店名なし）').slice(0, 5), 'この月の記録はありません');
+  $('#m-sub').innerHTML = `${list.length}件` + (diff === null ? '' : `<span class="delta ${diff > 0 ? 'up' : 'down'}">前月比 ${diff >= 0 ? '+' : ''}${diff}%</span>`);
 
   // 直近6か月（表示中の月を右端に）。棒をタップするとその月へ移動
   const months = [...Array(6)].map((_, i) => shiftMonth(ym, i - 5));
@@ -279,12 +286,66 @@ function renderMonthly() {
   const max = Math.max(...totals, 1);
   const trend = $('#m-trend');
   trend.innerHTML = months.map((m, i) => `
-    <button data-m="${m}" class="${m === ym ? 'on' : ''}" title="${monthLabel(m)}：${yen(totals[i])}">
-      <span class="v" style="bottom:calc(${(totals[i] / max) * 100}% + 4px)">${yen(totals[i])}</span>
+    <button data-m="${m}" role="listitem" class="${m === ym ? 'on' : ''}" title="${monthLabel(m)}：${yen(totals[i])}" aria-label="${monthLabel(m)} ${yen(totals[i])}">
       <div class="bar" style="height:${(totals[i] / max) * 100}%"></div>
     </button>`).join('');
   $('#m-trend-labels').innerHTML = months.map((m) => `<span class="${m === ym ? 'on' : ''}">${Number(m.slice(5))}月</span>`).join('');
   trend.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => { curMonth = b.dataset.m; renderMonthly(); }));
+
+  // ふたりの負担（清算済み・未清算を問わずこの月の全記録）
+  const t = { a: 0, b: 0, ownA: 0, ownB: 0, shared: 0, paidA: 0, paidB: 0 };
+  for (const p of list) {
+    const bd = burden(p);
+    const sp = split(p);
+    t.a += bd.a; t.b += bd.b;
+    t.ownA += sp.a; t.ownB += sp.b; t.shared += sp.shared;
+    if (p.payer === 'a') t.paidA += Number(p.total) || 0;
+    else t.paidB += Number(p.total) || 0;
+  }
+  const segs = [['a', `${name('a')}のもの`, t.ownA], ['both', '共有', t.shared], ['b', `${name('b')}のもの`, t.ownB]];
+  const sum = t.ownA + t.shared + t.ownB;
+  const bar = $('#m-split');
+  bar.innerHTML = sum ? segs.filter((x) => x[2] > 0).map(([k, label, v]) =>
+    `<div class="seg-${k}" style="flex-grow:${v}" title="${esc(label)}：${yen(v)}（${Math.round((v / sum) * 100)}%）"></div>`).join('') : '';
+  bar.hidden = !sum;
+  bar.setAttribute('aria-label', segs.map(([, label, v]) => `${label} ${yen(v)}`).join('、'));
+  $('#m-split-legend').innerHTML = sum ? segs.map(([k, label, v]) => `
+    <div><span class="dot ${k}"></span><span class="muted">${esc(label)}</span><strong>${yen(v)}</strong></div>`).join('') : '';
+
+  const diffA = t.paidA - t.a;
+  const row = (label, a, b, cls = '') => `<tr class="${cls}"><td>${label}</td><td>${a}</td><td>${b}</td></tr>`;
+  const signed = (n) => n === 0 ? '±0' : (n > 0 ? '+' : '−') + yen(Math.abs(n)).slice(1);
+  $('#m-burden').innerHTML = !list.length ? '' : `
+    <tr><th></th><th><span class="dot a"></span>${esc(name('a'))}</th><th><span class="dot b"></span>${esc(name('b'))}</th></tr>
+    ${row('負担すべき額', yen(t.a), yen(t.b), 'strong')}
+    ${row('実際に払った額', yen(t.paidA), yen(t.paidB))}
+    ${row('払いすぎ(+)/不足(−)', signed(diffA), signed(-diffA))}`;
+
+  // この月の清算
+  const open = list.filter((p) => !p.settled);
+  const el = $('#m-settle');
+  if (!list.length) el.innerHTML = '<div class="empty">この月の記録はありません</div>';
+  else if (!open.length) el.innerHTML = '<div class="settled-note">✓ この月はすべて清算済みです</div>';
+  else {
+    const ms = summary(open);
+    el.innerHTML = `<div class="settle-row">
+        <div class="settle-month"><strong>未清算</strong><span class="muted small">${ms.count}件${open.length < list.length ? `（清算済み ${list.length - open.length}件）` : ''}</span></div>
+        <div class="settle-amt">${transferHtml(ms.net)}</div>
+        <button class="btn small primary" data-settle="${ym}">清算</button>
+      </div>`;
+    el.querySelector('[data-settle]').addEventListener('click', () => settle(ym));
+  }
+
+  // 内訳（タブで切り替え）
+  segment($('#m-tab'), M_TABS, mTab, (v) => { mTab = v; renderMonthly(); });
+  const key = { store: (p) => p.store || '（店名なし）', method: (p) => METHODS[p.method] || 'その他', payer: (p) => name(p.payer) }[mTab];
+  const rows = groupSum(list, key);
+  const top = rows.slice(0, 6);
+  if (rows.length > 6) {
+    const rest = rows.slice(6);
+    top.push({ label: `その他（${rest.length}）`, value: rest.reduce((x, r) => x + r.value, 0), count: rest.reduce((x, r) => x + r.count, 0) });
+  }
+  hbars($('#m-breakdown'), top, 'この月の記録はありません');
 
   renderEntries($('#m-list'), [...list].sort(byDateDesc), 'この月の記録はありません');
 }
@@ -599,6 +660,8 @@ function setBusy(busy, msg) {
 const SKIP_KEY = 'futari-seisan-paypay-skip';
 const PAYER_KEY = 'futari-seisan-paypay-payer';
 let impRows = [];
+let impLoading = false; // AI の振り分け中は一覧を出さない
+let impGen = 0;          // CSV を選び直したら古い AI の結果を捨てる
 
 function loadSkips() {
   try { return new Set(JSON.parse(localStorage.getItem(SKIP_KEY)) || []); } catch { return new Set(); }
@@ -611,7 +674,9 @@ function impPayer() {
 }
 
 function openImport() {
+  impGen++;
   impRows = [];
+  impLoading = false;
   $('#csv-input').value = '';
   $('#imp-status').textContent = '';
   segment($('#imp-payer'), [['a', name('a')], ['b', name('b')]], impPayer(), (v) => {
@@ -706,6 +771,7 @@ async function onCsv(file) {
     const done = new Set(data.payments.map((p) => p.paypayTxId).filter(Boolean));
     const skips = loadSkips();
     const fresh = all.filter((t) => !done.has(t.txId) && !skips.has(t.txId));
+    impGen++;
     impRows = fresh.sort((x, y) => y.date.localeCompare(x.date)).map((t) => ({ ...t, owner: guessOwner(t) }));
     matchExisting();
     const hidden = all.length - fresh.length;
@@ -714,8 +780,9 @@ async function onCsv(file) {
     impRows = [];
     $('#imp-status').textContent = '⚠ ' + ((e && e.message) || '読み込みに失敗しました');
   }
+  impLoading = !!data.settings.apiKey && impRows.some((t) => !t.match);
   renderImport();
-  if (data.settings.apiKey && impRows.some((t) => !t.match)) aiAssign();
+  if (impLoading) aiAssign();
 }
 
 // ===== AI 振り分け =====
@@ -755,9 +822,11 @@ function ownerExamples(limit = 60) {
 
 async function aiAssign() {
   const { apiKey, model, rules } = data.settings;
-  if (!apiKey) { toast('設定で API キーを入力してください'); show('settings'); return; }
+  const done = () => { impLoading = false; renderImport(); };
+  if (!apiKey) { done(); toast('設定で API キーを入力してください'); show('settings'); return; }
   const targets = impRows.map((t, i) => ({ t, i })).filter(({ t }) => !t.match);
-  if (!targets.length) return;
+  if (!targets.length) { done(); return; }
+  const gen = impGen;
   const status = $('#imp-status');
   const before = status.textContent;
   $('#btn-imp-ai').disabled = true;
@@ -797,6 +866,7 @@ ${rules || '（未設定）'}`;
     });
     if (response.stop_reason === 'refusal') throw new Error('AI が振り分けを断りました');
     if (response.stop_reason === 'max_tokens') throw new Error('出力が途中で切れました。CSV の期間を短くしてお試しください');
+    if (gen !== impGen) return;
     const text = response.content.filter((b) => b.type === 'text').map((b) => b.text).join('');
     const { assignments } = JSON.parse(text);
     let n = 0;
@@ -808,20 +878,29 @@ ${rules || '（未設定）'}`;
       n++;
     }
     status.textContent = `🤖 AI が ${n}件を振り分けました。違うものだけ直して記録してください。`;
-    renderImport();
   } catch (e) {
     console.error(e);
+    if (gen !== impGen) return;
     const st = e && e.status;
     const msg = st === 401 ? 'API キーが正しくありません'
       : st === 429 ? '混雑しています。少し待って「AIで振り分け直す」を押してください'
       : (e && e.message) || 'AI 振り分けに失敗しました';
-    status.textContent = `${before}\n⚠ ${msg}`;
+    status.textContent = `${before}\n⚠ ${msg}（前回と同じお店の割り当てを初期値にしています）`;
   }
   $('#btn-imp-ai').disabled = false;
+  done();
 }
 
 function renderImport() {
   const el = $('#imp-list');
+  if (impLoading) {
+    el.innerHTML = '<div class="card imp-loading"><div class="spinner"></div>🤖 AI がルールに沿って振り分けています…<br><span class="muted small">終わると一覧が表示されます</span></div>';
+    $('#imp-bulk').hidden = true;
+    $('#imp-ai-row').hidden = true;
+    $('#btn-imp-save').disabled = true;
+    return;
+  }
+  $('#btn-imp-ai').disabled = false;
   el.innerHTML = impRows.map((t, i) => {
     const m = t.match && data.payments.find((p) => p.id === t.match);
     const note = [t.kind && t.kind !== '支払い' ? t.kind : '', t.way].filter(Boolean).join('・');
@@ -1062,7 +1141,6 @@ document.querySelectorAll('.tabbar button').forEach((b) => b.addEventListener('c
   if (b.dataset.view === 'edit') openEdit(null);
   else show(b.dataset.view);
 }));
-$('#btn-settle').addEventListener('click', settle);
 $('#m-prev').addEventListener('click', () => { curMonth = shiftMonth(curMonth, -1); renderMonthly(); });
 $('#m-next').addEventListener('click', () => { curMonth = shiftMonth(curMonth, 1); renderMonthly(); });
 $('#history-filter').addEventListener('change', renderHistory);
@@ -1099,7 +1177,7 @@ document.querySelectorAll('[data-imp-bulk]').forEach((b) => b.addEventListener('
   renderImport();
 }));
 $('#btn-imp-save').addEventListener('click', saveImport);
-$('#btn-imp-ai').addEventListener('click', aiAssign);
+$('#btn-imp-ai').addEventListener('click', () => { impLoading = true; renderImport(); aiAssign(); });
 $('#btn-imp-rules').addEventListener('click', () => show('settings'));
 $('#btn-imp-cancel').addEventListener('click', () => show('home'));
 

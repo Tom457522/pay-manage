@@ -21,7 +21,7 @@
         <div class="muted">未清算の差額</div>
         <div id="balance-text" class="balance-text">—</div>
         <div id="balance-detail" class="muted small"></div>
-        <button id="btn-settle" class="btn primary" disabled>清算した（リセット）</button>
+        <div id="settle-months" class="settle-months"></div>
       </div>
 
       <button class="btn full import-entry" data-open-import>📄 PayPay の履歴（CSV）を取り込む</button>
@@ -153,28 +153,35 @@
         <h2 id="m-label"></h2>
         <button id="m-next" class="btn small" aria-label="次の月">›</button>
       </div>
-      <div class="card hero">
-        <div class="muted small">支出合計</div>
-        <div id="m-total" class="hero-num"></div>
-        <div id="m-sub" class="muted small"></div>
+
+      <div class="card m-overview">
+        <div class="m-total">
+          <div class="muted small">支出合計</div>
+          <div id="m-total" class="hero-num"></div>
+          <div id="m-sub" class="muted small"></div>
+        </div>
+        <div class="m-spark">
+          <div id="m-trend" class="trend" role="list" aria-label="直近6か月の支出"></div>
+          <div id="m-trend-labels" class="trend-labels"></div>
+        </div>
       </div>
+
       <div class="card">
         <h2>ふたりの負担</h2>
+        <div id="m-split" class="split-bar" role="img"></div>
+        <div id="m-split-legend" class="split-legend"></div>
         <table class="mtable" id="m-burden"></table>
+        <div id="m-settle" class="m-settle"></div>
       </div>
+
       <div class="card">
-        <h2>支払い方法</h2>
-        <div id="m-methods" class="hbars"></div>
+        <div class="row between">
+          <h2>内訳</h2>
+          <div class="seg mini" id="m-tab"></div>
+        </div>
+        <div id="m-breakdown" class="hbars"></div>
       </div>
-      <div class="card">
-        <h2>よく使ったお店</h2>
-        <div id="m-stores" class="hbars"></div>
-      </div>
-      <div class="card">
-        <h2>直近6か月の支出</h2>
-        <div id="m-trend" class="trend"></div>
-        <div id="m-trend-labels" class="trend-labels"></div>
-      </div>
+
       <h2 class="section-title">この月の記録</h2>
       <div id="m-list" class="list"></div>
     </section>

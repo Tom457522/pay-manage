@@ -205,8 +205,22 @@ function renderEntries(el, list, emptyMsg) {
 
 function renderHistory() {
   const filter = $('#history-filter').value;
-  const list = livePayments().filter((p) => filter === 'all' || !p.settled).sort(byDateDesc);
-  renderEntries($('#history-list'), list, '記録がありません');
+  // 6分類の選択肢（名前が変わることがあるので毎回作る）
+  const sel = $('#history-cell');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">すべての分類</option>'
+    + CELLS.map((c) => `<option value="${c.key}">${c.no} ${esc(cellTitle(c))}</option>`).join('');
+  sel.value = CELLS.some((c) => c.key === cur) ? cur : '';
+  const c = CELLS.find((x) => x.key === sel.value);
+
+  let list = livePayments().filter((p) => filter === 'all' || !p.settled);
+  if (c) list = list.filter((p) => p.payer === c.payer && split(p)[c.owner] > 0);
+  list.sort(byDateDesc);
+  renderEntries($('#history-list'), list, c ? 'この分類の記録はありません' : '記録がありません');
+
+  // 絞り込み結果の合計。分類で絞ったときは、品目ごとに分けた記録のうちその分類の金額だけを数える
+  const total = list.reduce((x, p) => x + (c ? split(p)[c.owner] : Number(p.total) || 0), 0);
+  $('#history-summary').textContent = list.length ? `${list.length}件・${c ? 'この分類の金額' : '合計'} ${yen(total)}` : '';
 
   const sts = data.settlements.filter((s) => !s.deleted).sort((x, y) => y.date.localeCompare(x.date));
   const el = $('#settlement-list');
@@ -1215,6 +1229,7 @@ $('#m-prev').addEventListener('click', () => { curMonth = shiftMonth(curMonth, -
 $('#m-next').addEventListener('click', () => { curMonth = shiftMonth(curMonth, 1); mCell = null; renderMonthly(); });
 $('#m-list-clear').addEventListener('click', () => { mCell = null; renderMonthly(); });
 $('#history-filter').addEventListener('change', renderHistory);
+$('#history-cell').addEventListener('change', renderHistory);
 $('#photo-input').addEventListener('change', (e) => onPhoto(e.target.files[0]));
 $('#camera-input').addEventListener('change', (e) => onPhoto(e.target.files[0]));
 $('#btn-ai').addEventListener('click', aiRead);

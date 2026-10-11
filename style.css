@@ -288,3 +288,8 @@ textarea { resize: vertical; font: inherit; line-height: 1.5; }
 .calc-line.zero .calc-v { font-weight: 400; }
 .calc-result { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding-top: 10px; font-size: 14px; }
 .calc-result strong { font-size: 18px; font-variant-numeric: tabular-nums; }
+
+/* 履歴の絞り込み */
+.history-filters { margin-bottom: 8px; }
+.history-filters select { min-width: 0; }
+.history-summary { margin-bottom: 8px; }

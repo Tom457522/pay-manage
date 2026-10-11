@@ -134,13 +134,15 @@
 
     <!-- 履歴 -->
     <section id="view-history" class="view">
-      <div class="row between">
-        <h2 class="section-title">履歴</h2>
-        <select id="history-filter">
+      <h2 class="section-title">履歴</h2>
+      <div class="row gap small-gap history-filters">
+        <select id="history-filter" aria-label="清算の状態">
           <option value="unsettled">未清算のみ</option>
           <option value="all">すべて</option>
         </select>
+        <select id="history-cell" class="grow" aria-label="分類"></select>
       </div>
+      <div id="history-summary" class="muted small history-summary"></div>
       <div id="history-list" class="list"></div>
       <h2 class="section-title">清算の記録</h2>
       <div id="settlement-list" class="list"></div>

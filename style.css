@@ -217,3 +217,14 @@ select { width: auto; margin: 0; }
   opacity: 0; pointer-events: none; transition: opacity .2s; max-width: calc(100% - 32px);
 }
 .toast.show { opacity: 1; }
+
+/* PayPay CSV 取り込み */
+.import-entry { margin-top: 12px; }
+#view-home .import-entry { margin: 0 0 16px; }
+.item[data-owner=skip] { opacity: .55; }
+.seg button.on[data-v=skip] { background: var(--muted); border-color: var(--muted); color: #fff; }
+.item .imp-head { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.item .imp-head .title { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item .imp-head .amount { font-weight: 700; white-space: nowrap; }
+.imp-note { font-size: 12px; color: var(--muted); margin: -4px 0 6px; }
+.imp-actions { margin-top: 16px; }

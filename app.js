@@ -593,6 +593,192 @@ function setBusy(busy, msg) {
   $('#ocr-status').textContent = msg || '';
 }
 
+// ===== PayPay CSV 取り込み =====
+// PayPay アプリの「取引履歴」からダウンロードした CSV を読み、出金（支払い）を記録にする。
+// 取引番号で取り込み済みを判定し、除外した取引はこの端末に覚えておく。
+const SKIP_KEY = 'futari-seisan-paypay-skip';
+const PAYER_KEY = 'futari-seisan-paypay-payer';
+let impRows = [];
+
+function loadSkips() {
+  try { return new Set(JSON.parse(localStorage.getItem(SKIP_KEY)) || []); } catch { return new Set(); }
+}
+function saveSkips(set) {
+  try { localStorage.setItem(SKIP_KEY, JSON.stringify([...set])); } catch { /* 覚えられなくても取り込みは続ける */ }
+}
+function impPayer() {
+  try { return localStorage.getItem(PAYER_KEY) || 'a'; } catch { return 'a'; }
+}
+
+function openImport() {
+  impRows = [];
+  $('#csv-input').value = '';
+  $('#imp-status').textContent = '';
+  segment($('#imp-payer'), [['a', name('a')], ['b', name('b')]], impPayer(), (v) => {
+    try { localStorage.setItem(PAYER_KEY, v); } catch { /* 次回は既定値に戻るだけ */ }
+    if (impRows.length) { matchExisting(); renderImport(); }
+  });
+  document.querySelector('[data-imp-bulk=a]').textContent = name('a');
+  document.querySelector('[data-imp-bulk=b]').textContent = name('b');
+  renderImport();
+  show('import');
+}
+
+// ダブルクォート・改行入りのセルにも対応した CSV パーサー
+function parseCsv(text) {
+  const rows = [];
+  let row = [], cell = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { cell += '"'; i++; } else q = false;
+      } else cell += c;
+    } else if (c === '"') q = true;
+    else if (c === ',') { row.push(cell); cell = ''; }
+    else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text[i + 1] === '\n') i++;
+      row.push(cell); rows.push(row); row = []; cell = '';
+    } else cell += c;
+  }
+  if (cell || row.length) { row.push(cell); rows.push(row); }
+  return rows.filter((r) => r.some((c) => c.trim()));
+}
+
+// UTF-8 で読めなければ Shift_JIS として読む
+async function readCsvText(file) {
+  const buf = await file.arrayBuffer();
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(buf).replace(/^﻿/, ''); }
+  catch { return new TextDecoder('shift_jis').decode(buf); }
+}
+
+const num = (s) => Number(String(s ?? '').replace(/[^\d.-]/g, '')) || 0;
+
+function parsePayPayCsv(text) {
+  const rows = parseCsv(text);
+  const h = rows.findIndex((r) => r.some((c) => c.trim() === '取引日'));
+  if (h < 0) throw new Error('PayPay の取引履歴 CSV ではないようです（「取引日」の列がありません）');
+  const head = rows[h].map((c) => c.trim());
+  const col = (test) => head.findIndex(test);
+  const iDate = col((c) => c === '取引日');
+  const iOut = col((c) => c.startsWith('出金金額'));
+  const iKind = col((c) => c === '取引内容');
+  const iStore = col((c) => c === '取引先');
+  const iWay = col((c) => c === '取引方法');
+  const iNo = col((c) => c === '取引番号');
+  if (iOut < 0) throw new Error('「出金金額」の列が見つかりません');
+  return rows.slice(h + 1).map((r) => {
+    const m = String(r[iDate] || '').match(/(\d{4})[/-](\d{1,2})[/-](\d{1,2})/);
+    const date = m ? `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}` : '';
+    const amount = num(r[iOut]);
+    const store = String(r[iStore] ?? '').trim();
+    const kind = String(r[iKind] ?? '').trim();
+    const txId = String(r[iNo] ?? '').trim() || `${r[iDate]}|${amount}|${store}`;
+    return { txId, date, amount, store, kind, way: String(r[iWay] ?? '').trim() };
+  }).filter((t) => t.date && t.amount > 0);
+}
+
+// 同じお店の直近の記録から負担者を推測する
+function guessOwner(t) {
+  if (t.kind && !t.kind.includes('支払')) return 'skip'; // 送金などは既定で除外
+  const prev = livePayments()
+    .filter((p) => p.store && p.store === t.store && !(p.items || []).length)
+    .sort(byDateDesc)[0];
+  return prev ? prev.wholeOwner || 'both' : 'both';
+}
+
+// 手入力済み（レシート撮影など）の記録と同じ取引は、新規作成せず紐づけるだけにする
+function matchExisting() {
+  const payer = impPayer();
+  const used = new Set();
+  for (const t of impRows) {
+    const p = livePayments().find((x) => !x.paypayTxId && !used.has(x.id) && x.method === 'paypay'
+      && x.payer === payer && x.date === t.date && Number(x.total) === t.amount);
+    t.match = p ? p.id : null;
+    if (p) used.add(p.id);
+  }
+}
+
+async function onCsv(file) {
+  if (!file) return;
+  try {
+    const all = parsePayPayCsv(await readCsvText(file));
+    const done = new Set(data.payments.map((p) => p.paypayTxId).filter(Boolean));
+    const skips = loadSkips();
+    const fresh = all.filter((t) => !done.has(t.txId) && !skips.has(t.txId));
+    impRows = fresh.sort((x, y) => y.date.localeCompare(x.date)).map((t) => ({ ...t, owner: guessOwner(t) }));
+    matchExisting();
+    const hidden = all.length - fresh.length;
+    $('#imp-status').textContent = `出金 ${all.length}件中 ${impRows.length}件が未取り込みです` + (hidden ? `（取り込み済み・除外済み ${hidden}件は非表示）` : '') + (impRows.length ? '。負担者を選んでください。' : '。');
+  } catch (e) {
+    impRows = [];
+    $('#imp-status').textContent = '⚠ ' + ((e && e.message) || '読み込みに失敗しました');
+  }
+  renderImport();
+}
+
+function renderImport() {
+  const el = $('#imp-list');
+  el.innerHTML = impRows.map((t, i) => {
+    const m = t.match && data.payments.find((p) => p.id === t.match);
+    const note = [t.kind && t.kind !== '支払い' ? t.kind : '', t.way].filter(Boolean).join('・');
+    return `<div class="item" data-owner="${t.match ? 'linked' : t.owner}" data-i="${i}">
+      <div class="imp-head"><div class="title">${esc(t.store || '（取引先なし）')}</div><div class="amount">${yen(t.amount)}</div></div>
+      <div class="imp-note">${esc(t.date)}${note ? '・' + esc(note) : ''}</div>
+      ${m ? `<div class="imp-note">✓ 記録済み「${esc(m.store || '店名なし')}」と同じ取引として紐づけます</div>` : '<div class="seg"></div>'}
+    </div>`;
+  }).join('');
+  el.querySelectorAll('.item').forEach((card) => {
+    const t = impRows[Number(card.dataset.i)];
+    if (t.match) return;
+    segment(card.querySelector('.seg'), [...ownerOptions(), ['skip', '除外']], t.owner, (v) => {
+      t.owner = v;
+      card.dataset.owner = v;
+      updateImportButton();
+    });
+  });
+  $('#imp-bulk').hidden = !impRows.some((t) => !t.match);
+  updateImportButton();
+}
+
+function updateImportButton() {
+  const n = impRows.filter((t) => !t.match && t.owner !== 'skip').length;
+  const linked = impRows.filter((t) => t.match).length;
+  const b = $('#btn-imp-save');
+  b.disabled = !impRows.length;
+  b.textContent = n ? `${n}件を記録する` : linked ? '紐づけて完了' : impRows.length ? '除外して完了' : '記録する';
+}
+
+function saveImport() {
+  const payer = impPayer();
+  const now = Date.now();
+  const changed = [];
+  const skips = loadSkips();
+  for (const t of impRows) {
+    if (t.match) {
+      const p = data.payments.find((x) => x.id === t.match);
+      p.paypayTxId = t.txId; p.updatedAt = now;
+      changed.push(p);
+    } else if (t.owner === 'skip') {
+      skips.add(t.txId);
+    } else {
+      const p = {
+        id: uid(), date: t.date, store: t.store, payer, method: 'paypay', total: t.amount,
+        memo: t.kind && t.kind !== '支払い' ? t.kind : '', items: [], wholeOwner: t.owner,
+        ratio: data.settings.ratio, paypayTxId: t.txId, settled: false, createdAt: now, updatedAt: now,
+      };
+      data.payments.push(p);
+      changed.push(p);
+    }
+  }
+  saveSkips(skips);
+  save();
+  if (changed.length) push('payments', changed);
+  const added = impRows.filter((t) => !t.match && t.owner !== 'skip').length;
+  toast(added ? `${added}件を記録しました` : '取り込みを完了しました');
+  show('home');
+}
+
 // ===== 設定・入出力 =====
 function renderSettings() {
   const s = data.settings;
@@ -792,6 +978,14 @@ $('#btn-sync-create').addEventListener('click', syncCreate);
 $('#btn-sync-join').addEventListener('click', () => syncJoin($('#sync-code-input').value));
 $('#btn-sync-leave').addEventListener('click', syncLeave);
 $('#btn-sync-copy').addEventListener('click', copyInvite);
+document.querySelectorAll('[data-open-import]').forEach((b) => b.addEventListener('click', openImport));
+$('#csv-input').addEventListener('change', (e) => onCsv(e.target.files[0]));
+document.querySelectorAll('[data-imp-bulk]').forEach((b) => b.addEventListener('click', () => {
+  impRows.forEach((t) => { if (!t.match) t.owner = b.dataset.impBulk; });
+  renderImport();
+}));
+$('#btn-imp-save').addEventListener('click', saveImport);
+$('#btn-imp-cancel').addEventListener('click', () => show('home'));
 
 renderHome();
 Sync.init({ onRecords: onRemoteRecords, onSettings: onRemoteSettings, onStatus: renderSync }).then(() => {

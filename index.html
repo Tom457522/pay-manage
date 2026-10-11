@@ -24,6 +24,8 @@
         <button id="btn-settle" class="btn primary" disabled>清算した（リセット）</button>
       </div>
 
+      <button class="btn full import-entry" data-open-import>📄 PayPay の履歴（CSV）を取り込む</button>
+
       <div class="card">
         <h2>未清算の内訳</h2>
         <div class="stats">
@@ -55,6 +57,7 @@
           <button id="btn-ocr" class="btn grow" disabled>簡易OCR</button>
         </div>
         <div id="ocr-status" class="muted small status"></div>
+        <button class="btn small full import-entry" data-open-import>📄 PayPay の履歴（CSV）からまとめて取り込む</button>
       </div>
 
       <div class="card form">
@@ -99,6 +102,30 @@
         <button id="btn-save" class="btn primary grow">保存</button>
       </div>
       <button id="btn-delete" class="btn danger full" hidden>この記録を削除</button>
+    </section>
+
+    <!-- PayPay CSV 取り込み -->
+    <section id="view-import" class="view">
+      <div class="card form">
+        <h2>PayPay の履歴を取り込む</h2>
+        <p class="muted small">PayPay アプリの「取引履歴」→ 右上のダウンロードボタンで期間を選んで CSV を保存し、ここで選んでください。取り込み済みの取引は表示されません。</p>
+        <div class="field-label">払った人（この CSV の持ち主）</div>
+        <div class="seg" id="imp-payer"></div>
+        <label class="btn primary full">CSV ファイルを選ぶ<input type="file" id="csv-input" accept=".csv,text/csv,text/comma-separated-values" hidden></label>
+        <div id="imp-status" class="muted small status"></div>
+      </div>
+      <div id="imp-bulk" class="row gap small-gap bulk" hidden>
+        <span class="muted small">一括：</span>
+        <button class="btn tiny" data-imp-bulk="a"></button>
+        <button class="btn tiny" data-imp-bulk="both">共有</button>
+        <button class="btn tiny" data-imp-bulk="b"></button>
+        <button class="btn tiny" data-imp-bulk="skip">除外</button>
+      </div>
+      <div id="imp-list" class="items"></div>
+      <div class="row gap imp-actions">
+        <button id="btn-imp-cancel" class="btn grow">戻る</button>
+        <button id="btn-imp-save" class="btn primary grow" disabled>記録する</button>
+      </div>
     </section>
 
     <!-- 履歴 -->

@@ -54,6 +54,7 @@ const toNum = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : Number(v
 const oneOf = (v, list, dflt) => (list.includes(v) ? v : dflt);
 const ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const TIME_RE = /^\d{2}:\d{2}$/;
 const cleanDate = (v) => (typeof v === 'string' && DATE_RE.test(v) ? v : '');
 
 function cleanPayment(p) {
@@ -81,6 +82,7 @@ function cleanPayment(p) {
   if (typeof p.ratio === 'number' && p.ratio >= 0 && p.ratio <= 100) out.ratio = p.ratio;
   if (p.fixed && typeof p.fixed === 'object') out.fixed = { a: toNum(p.fixed.a) };
   if (typeof p.paypayTxId === 'string' && p.paypayTxId) out.paypayTxId = p.paypayTxId.slice(0, 100);
+  if (typeof p.time === 'string' && TIME_RE.test(p.time)) out.time = p.time;
   return out;
 }
 
@@ -264,7 +266,8 @@ function settle(ym) {
 }
 
 // ===== 履歴 =====
-const byDateDesc = (x, y) => (y.date || '').localeCompare(x.date || '') || (y.createdAt || 0) - (x.createdAt || 0);
+const byDateDesc = (x, y) => (y.date || '').localeCompare(x.date || '') || (y.time || '').localeCompare(x.time || '')
+  || (y.createdAt || 0) - (x.createdAt || 0);
 
 // この記録が当てはまる6分類の番号（品目ごとに分けた記録は複数）
 function cellNos(p) {
@@ -282,7 +285,7 @@ function renderEntries(el, list, emptyMsg, selected = null, onToggle = null) {
       ${selected ? '<span class="check-zone" aria-hidden="true"><span class="check"></span></span>' : ''}
       <div style="min-width:0;flex:1">
         <div class="title">${esc(p.store || '（店名なし）')}</div>
-        <div class="meta"><span class="badge cell">${cellNos(p)}</span><span class="badge ${esc(p.payer)}">${esc(name(p.payer))}払い</span><span class="badge">${METHODS[p.method] || ''}</span><span class="nowrap">${esc(p.date)}${p.settled ? '・清算済' : ''}</span></div>
+        <div class="meta"><span class="badge cell">${cellNos(p)}</span><span class="badge ${esc(p.payer)}">${esc(name(p.payer))}払い</span><span class="badge">${METHODS[p.method] || ''}</span><span class="nowrap">${esc(p.date)}${p.time ? ' ' + esc(p.time) : ''}${p.settled ? '・清算済' : ''}</span></div>
       </div>
       <div class="amount">${yen(p.total)}<div class="meta">${esc(name('a'))} ${yen(bd.a)} / ${esc(name('b'))} ${yen(bd.b)}</div></div>
     </button>`;
@@ -1101,11 +1104,23 @@ function matchExisting() {
   }
 }
 
+// 時刻を保存する前に取り込んだ記録へ、CSV の時刻を補う
+function fillTimes(rows) {
+  const byTx = new Map(rows.filter((t) => t.time).map((t) => [t.txId, t.time]));
+  const now = Date.now();
+  const changed = data.payments.filter((p) => p.paypayTxId && !p.time && byTx.has(p.paypayTxId));
+  changed.forEach((p) => { p.time = byTx.get(p.paypayTxId); p.updatedAt = now; });
+  if (!changed.length) return;
+  save();
+  push('payments', changed);
+}
+
 async function onCsv(file) {
   if (!file) return;
   try {
     const all = parsePayPayCsv(await readCsvText(file));
     const done = new Set(data.payments.map((p) => p.paypayTxId).filter(Boolean));
+    fillTimes(all);
     const skips = loadSkips();
     const fresh = all.filter((t) => !done.has(t.txId) && !skips.has(t.txId));
     impGen++;
@@ -1278,6 +1293,7 @@ function saveImport() {
     if (t.match) {
       const p = data.payments.find((x) => x.id === t.match);
       p.paypayTxId = t.txId; p.updatedAt = now;
+      if (t.time && !p.time) p.time = t.time;
       changed.push(p);
     } else if (t.owner === 'skip') {
       skips.add(t.txId);
@@ -1285,7 +1301,7 @@ function saveImport() {
       const p = {
         id: uid(), date: t.date, store: t.store, payer, method: 'paypay', total: t.amount,
         memo: t.kind && t.kind !== '支払い' ? t.kind : '', items: [], wholeOwner: t.owner,
-        ratio: data.settings.ratio, paypayTxId: t.txId, settled: false, createdAt: now, updatedAt: now,
+        ratio: data.settings.ratio, paypayTxId: t.txId, ...(t.time ? { time: t.time } : {}), settled: false, createdAt: now, updatedAt: now,
       };
       data.payments.push(p);
       changed.push(p);

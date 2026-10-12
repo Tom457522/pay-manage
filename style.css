@@ -314,7 +314,11 @@ textarea { resize: vertical; font: inherit; line-height: 1.5; }
 /* 履歴の一括変更 */
 .badge.cell { background: none; padding: 0 4px 0 0; color: var(--text); letter-spacing: 1px; }
 .hist-select-tools { margin-bottom: 8px; }
-.entry.selectable { justify-content: flex-start; }
+.entry.selectable { justify-content: flex-start; padding-left: 0; }
+/* ○ の列はドラッグ選択用：ここから始めた指の動きはスクロールにしない */
+.entry .check-zone { flex: none; align-self: stretch; width: 48px; margin: -12px 0; display: grid; place-items: center; touch-action: none; cursor: ns-resize; }
+#history-list.dragging { user-select: none; -webkit-user-select: none; }
+#history-list.dragging .entry { transition: none; }
 .entry .check { flex: none; width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--border); display: grid; place-items: center; }
 .entry.selected { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary) inset; }
 .entry.selected .check { background: var(--primary); border-color: var(--primary); }

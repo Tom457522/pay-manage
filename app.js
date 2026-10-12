@@ -208,7 +208,7 @@ function renderEntries(el, list, emptyMsg, selected = null, onToggle = null) {
     const bd = burden(p);
     const on = selected && selected.has(p.id);
     return `<button class="entry${selected ? ' selectable' : ''}${on ? ' selected' : ''}" data-id="${p.id}"${selected ? ` aria-pressed="${on}"` : ''}>
-      ${selected ? '<span class="check" aria-hidden="true"></span>' : ''}
+      ${selected ? '<span class="check-zone" aria-hidden="true"><span class="check"></span></span>' : ''}
       <div style="min-width:0;flex:1">
         <div class="title">${esc(p.store || '（店名なし）')}</div>
         <div class="meta"><span class="badge cell">${cellNos(p)}</span><span class="badge ${p.payer}">${esc(name(p.payer))}払い</span><span class="badge">${METHODS[p.method] || ''}</span><span class="nowrap">${esc(p.date)}${p.settled ? '・清算済' : ''}</span></div>
@@ -216,8 +216,9 @@ function renderEntries(el, list, emptyMsg, selected = null, onToggle = null) {
       <div class="amount">${yen(p.total)}<div class="meta">${esc(name('a'))} ${yen(bd.a)} / ${esc(name('b'))} ${yen(bd.b)}</div></div>
     </button>`;
   }).join('');
-  el.querySelectorAll('.entry').forEach((b) => b.addEventListener('click', () => {
+  el.querySelectorAll('.entry').forEach((b) => b.addEventListener('click', (e) => {
     if (!selected) { openEdit(b.dataset.id); return; }
+    if (e.target.closest('.check-zone')) return; // ○ の列はドラッグ選択（pointerdown）で処理済み
     const id = b.dataset.id;
     if (selected.has(id)) selected.delete(id); else selected.add(id);
     b.classList.toggle('selected', selected.has(id));
@@ -229,6 +230,76 @@ function renderEntries(el, list, emptyMsg, selected = null, onToggle = null) {
 // ===== 履歴の一括変更 =====
 let histSel = null;      // 選択モード中は選んだ記録の id の Set
 let histVisible = [];    // いま一覧に出ている記録の id
+
+// ○ の列をなぞって連続選択する。始点のカードの状態で「選択」か「解除」かを決め、
+// 始点から指の位置までの範囲に適用する（戻れば元に戻る）。画面の端では自動スクロール。
+const drag = { on: false, mode: true, anchor: 0, cur: 0, snapshot: null, x: 0, y: 0, raf: 0, pid: null };
+
+function dragCards() { return [...$('#history-list').querySelectorAll('.entry')]; }
+
+function dragApply() {
+  const cards = dragCards();
+  const [lo, hi] = [Math.min(drag.anchor, drag.cur), Math.max(drag.anchor, drag.cur)];
+  let changed = false;
+  cards.forEach((b, i) => {
+    const id = b.dataset.id;
+    const want = i >= lo && i <= hi ? drag.mode : drag.snapshot.has(id);
+    if (histSel.has(id) === want) return;
+    if (want) histSel.add(id); else histSel.delete(id);
+    b.classList.toggle('selected', want);
+    b.setAttribute('aria-pressed', want);
+    changed = true;
+  });
+  if (changed) { updateHistBulk(); if (navigator.vibrate) navigator.vibrate(8); }
+}
+
+// 指の高さにあるカードの番号（カードの隙間なら近い方）
+function dragIndexAt(y) {
+  const cards = dragCards();
+  let best = drag.cur, dist = Infinity;
+  cards.forEach((b, i) => {
+    const r = b.getBoundingClientRect();
+    const d = y < r.top ? r.top - y : y > r.bottom ? y - r.bottom : 0;
+    if (d < dist) { dist = d; best = i; }
+  });
+  return best;
+}
+
+function dragLoop() {
+  if (!drag.on) return;
+  // 上はヘッダーの下、下は一括変更バーの上を基準に、端に近いほど速くスクロール
+  const top = $('.topbar').getBoundingClientRect().bottom + 70;
+  const bottom = $('#hist-bulk').getBoundingClientRect().top - 50;
+  const v = drag.y < top ? -Math.min(18, (top - drag.y) / 3) : drag.y > bottom ? Math.min(18, (drag.y - bottom) / 3) : 0;
+  if (v) window.scrollBy(0, v);
+  const i = dragIndexAt(drag.y);
+  if (i !== drag.cur || v) { drag.cur = i; dragApply(); }
+  drag.raf = requestAnimationFrame(dragLoop);
+}
+
+function dragStart(e) {
+  const zone = e.target.closest('.check-zone');
+  if (!histSel || !zone) return;
+  e.preventDefault();
+  const card = zone.closest('.entry');
+  const cards = dragCards();
+  Object.assign(drag, {
+    on: true, anchor: cards.indexOf(card), snapshot: new Set(histSel),
+    mode: !histSel.has(card.dataset.id), x: e.clientX, y: e.clientY, pid: e.pointerId,
+  });
+  drag.cur = drag.anchor;
+  $('#history-list').setPointerCapture(e.pointerId);
+  $('#history-list').classList.add('dragging');
+  dragApply();
+  drag.raf = requestAnimationFrame(dragLoop);
+}
+function dragMove(e) { if (drag.on && e.pointerId === drag.pid) { drag.x = e.clientX; drag.y = e.clientY; } }
+function dragEnd(e) {
+  if (!drag.on || e.pointerId !== drag.pid) return;
+  drag.on = false;
+  cancelAnimationFrame(drag.raf);
+  $('#history-list').classList.remove('dragging');
+}
 
 function updateHistBulk() {
   const n = histSel ? histSel.size : 0;
@@ -1329,6 +1400,12 @@ $('#btn-hist-all').addEventListener('click', () => {
 });
 $('#hist-bulk-cell').addEventListener('change', updateHistBulk);
 $('#btn-hist-apply').addEventListener('click', applyHistBulk);
+$('#history-list').addEventListener('pointerdown', dragStart);
+// iOS Safari で○の列から始めたタッチがスクロールにならないよう念のため止める
+$('#history-list').addEventListener('touchstart', (e) => { if (histSel && e.target.closest('.check-zone')) e.preventDefault(); }, { passive: false });
+$('#history-list').addEventListener('pointermove', dragMove);
+$('#history-list').addEventListener('pointerup', dragEnd);
+$('#history-list').addEventListener('pointercancel', dragEnd);
 $('#photo-input').addEventListener('change', (e) => onPhoto(e.target.files[0]));
 $('#camera-input').addEventListener('change', (e) => onPhoto(e.target.files[0]));
 $('#btn-ai').addEventListener('click', aiRead);

@@ -52,8 +52,12 @@ function toast(msg) {
 // ===== 計算 =====
 // 1件の支払いについて、それぞれの負担額を返す。
 // 品目合計と支払合計がずれる分（外税・値引き・端数）は品目金額に比例して按分する。
+// p.fixed = { a: 金額 } があれば、品目・割合より優先して「a の負担額」をそのまま使う（b は残り）。
+const fixedA = (p, total) => Math.min(total, Math.max(0, Math.round(Number(p.fixed.a) || 0)));
+
 function burden(p) {
   const total = Number(p.total) || 0;
+  if (p.fixed) { const a = fixedA(p, total); return { a, b: total - a }; }
   const r = (p.ratio ?? data.settings.ratio) / 100;
   const items = (p.items || []).filter((it) => Number(it.price));
   const sum = items.reduce((s, it) => s + Number(it.price), 0);
@@ -74,6 +78,8 @@ function burden(p) {
 // 支払いを「aだけのもの / bだけのもの / 共有」に分ける（税・値引きの差額も比例按分）。
 function split(p) {
   const total = Number(p.total) || 0;
+  // 金額指定は「a のための分」と「b のための分」に分ける（共有分なし）
+  if (p.fixed) { const a = fixedA(p, total); return { a, b: total - a, shared: 0 }; }
   const items = (p.items || []).filter((it) => Number(it.price));
   const sum = items.reduce((s, it) => s + Number(it.price), 0);
   if (!items.length || sum === 0) {
@@ -474,8 +480,23 @@ function fillForm() {
   segment($('#f-whole-owner'), ownerOptions(), draft.wholeOwner, (v) => { draft.wholeOwner = v; updateSummary(); });
   document.querySelector('[data-bulk=a]').textContent = name('a');
   document.querySelector('[data-bulk=b]').textContent = name('b');
+  $('#fixed-label-a').textContent = `${name('a')}の負担（円）`;
+  $('#fixed-label-b').textContent = `${name('b')}の負担（円）`;
+  $('#f-fixed-on').checked = !!draft.fixed;
   renderItems();
 }
+
+// 金額指定の入力欄を、いまの合計と draft.fixed に合わせて表示する
+function syncFixedInputs() {
+  const on = !!draft.fixed;
+  $('#fixed-wrap').hidden = !on;
+  if (!on) return;
+  const total = draftTotal();
+  const a = fixedA(draft, total);
+  if (document.activeElement !== $('#f-fixed-a')) $('#f-fixed-a').value = a;
+  if (document.activeElement !== $('#f-fixed-b')) $('#f-fixed-b').value = total - a;
+}
+const draftTotal = () => Number(draft.total) || draft.items.reduce((s, it) => s + (Number(it.price) || 0), 0);
 
 function renderItems() {
   const el = $('#items');
@@ -518,10 +539,14 @@ function updateSummary() {
     <div class="line"><span>${esc(name('a'))} の負担</span><span class="a-text">${yen(bd.a)}</span></div>
     <div class="line"><span>${esc(name('b'))} の負担</span><span class="b-text">${yen(bd.b)}</span></div>
     <div class="line muted small"><span>${esc(name(other))} → ${esc(name(payer))} の立替分</span><span>${yen(bd[other])}</span></div>`;
+  syncFixedInputs();
   const diff = total - itemsSum;
-  $('#diff-note').textContent = draft.items.length && diff !== 0
-    ? `品目合計 ${yen(itemsSum)} と支払合計の差 ${diff > 0 ? '+' : ''}${diff.toLocaleString()}円（税・値引きなど）は品目の金額に比例して按分します。`
-    : '';
+  $('#diff-note').textContent = draft.fixed
+    ? (draft.items.length ? '金額で指定しているため、仕分けカードの割り当ては計算に使いません。' : '')
+    : draft.items.length && diff !== 0
+      ? `品目合計 ${yen(itemsSum)} と支払合計の差 ${diff > 0 ? '+' : ''}${diff.toLocaleString()}円（税・値引きなど）は品目の金額に比例して按分します。`
+      : '';
+  document.querySelectorAll('#items, #whole-owner-wrap, .bulk').forEach((el) => el.classList.toggle('dimmed', !!draft.fixed));
 }
 
 function readForm() {
@@ -538,6 +563,8 @@ function saveDraft() {
   draft.total = Number(draft.total) || itemsSum;
   if (!draft.total) { toast('支払合計を入力してください'); return; }
   draft.items = draft.items.map((it) => ({ ...it, price: Number(it.price) || 0 }));
+  if (draft.fixed) draft.fixed = { a: fixedA(draft, draft.total) };
+  else delete draft.fixed;
   const now = Date.now();
   draft.updatedAt = now;
   if (draft.id) {
@@ -831,7 +858,7 @@ function parsePayPayCsv(text) {
 function guessOwner(t) {
   if (t.kind && !t.kind.includes('支払')) return 'skip'; // 送金などは既定で除外
   const prev = livePayments()
-    .filter((p) => p.store && p.store === t.store && !(p.items || []).length)
+    .filter((p) => p.store && p.store === t.store && !(p.items || []).length && !p.fixed)
     .sort(byDateDesc)[0];
   return prev ? prev.wholeOwner || 'both' : 'both';
 }
@@ -896,7 +923,7 @@ function ownerExamples(limit = 60) {
   const seen = new Set();
   const out = [];
   for (const p of [...livePayments()].sort(byDateDesc)) {
-    if (!p.store || (p.items || []).length || seen.has(p.store)) continue;
+    if (!p.store || (p.items || []).length || p.fixed || seen.has(p.store)) continue;
     seen.add(p.store);
     out.push({ store: p.store, owner: p.wholeOwner || 'both' });
     if (out.length >= limit) break;
@@ -1235,6 +1262,22 @@ $('#camera-input').addEventListener('change', (e) => onPhoto(e.target.files[0]))
 $('#btn-ai').addEventListener('click', aiRead);
 $('#btn-ocr').addEventListener('click', ocrRead);
 $('#f-total').addEventListener('input', updateSummary);
+$('#f-fixed-on').addEventListener('change', (e) => {
+  // オンにしたときは、いまの計算結果を初期値にする
+  draft.fixed = e.target.checked ? { a: burden({ ...draft, fixed: null, total: draftTotal() }).a } : null;
+  updateSummary();
+});
+$('#f-fixed-a').addEventListener('input', (e) => {
+  draft.fixed = { a: Number(e.target.value) || 0 };
+  $('#f-fixed-b').value = Math.max(0, draftTotal() - (Number(e.target.value) || 0));
+  updateSummary();
+});
+$('#f-fixed-b').addEventListener('input', (e) => {
+  const a = Math.max(0, draftTotal() - (Number(e.target.value) || 0));
+  draft.fixed = { a };
+  $('#f-fixed-a').value = a;
+  updateSummary();
+});
 $('#btn-add-item').addEventListener('click', () => {
   readForm();
   draft.items.push({ id: uid(), name: '', price: '', owner: 'both' });

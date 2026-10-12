@@ -93,6 +93,14 @@
       </div>
 
       <div class="card summary-card">
+        <label class="switch-row">
+          <span>負担額を金額で指定</span>
+          <input type="checkbox" id="f-fixed-on" class="switch">
+        </label>
+        <div id="fixed-wrap" class="grid2 fixed-wrap" hidden>
+          <label><span id="fixed-label-a"></span><input type="number" id="f-fixed-a" inputmode="numeric" min="0"></label>
+          <label><span id="fixed-label-b"></span><input type="number" id="f-fixed-b" inputmode="numeric" min="0"></label>
+        </div>
         <div id="split-summary"></div>
         <div id="diff-note" class="muted small"></div>
       </div>

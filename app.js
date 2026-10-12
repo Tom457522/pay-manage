@@ -4,7 +4,7 @@
 const STORE_KEY = 'futari-seisan-v1';
 const METHODS = { paypay: 'PayPay', credit: 'クレカ', cash: '現金', other: 'その他' };
 const DEFAULT_MODEL = 'claude-opus-5-5';
-const SDK_URL = 'https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk/+esm';
+const API_URL = 'https://api.anthropic.com/v1/messages';
 
 const defaultData = () => ({
   settings: { names: { a: '夫', b: '妻' }, ratio: 50, apiKey: '', model: DEFAULT_MODEL, rules: '' },
@@ -12,17 +12,22 @@ const defaultData = () => ({
   settlements: [],
 });
 
-let data = load();
-let draft = null;        // 編集中の支払い
-let photoDataUrl = null; // 縮小済みレシート画像
-
 function load() {
   try {
     const raw = localStorage.getItem(STORE_KEY);
     if (!raw) return defaultData();
     const d = JSON.parse(raw);
     const base = defaultData();
-    return { ...base, ...d, settings: { ...base.settings, ...d.settings, names: { ...base.settings.names, ...(d.settings || {}).names } } };
+    const s = d.settings || {};
+    return {
+      settings: {
+        ...cleanSettings(s, base.settings),
+        apiKey: str(s.apiKey, 300),
+        model: str(s.model, 100) || DEFAULT_MODEL,
+      },
+      payments: cleanList(d.payments, cleanPayment),
+      settlements: cleanList(d.settlements, cleanSettlement),
+    };
   } catch {
     return defaultData();
   }
@@ -41,6 +46,68 @@ const name = (who) => data.settings.names[who];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const livePayments = () => data.payments.filter((p) => !p.deleted);
 
+// ===== 外部から来るデータの検証 =====
+// 同期・ファイル読み込み・端末保存から来た記録は、決まった形・型・長さに揃えてから使う。
+// （画面に出す値に想定外の文字列が混ざらないようにするため。Firestore ルールも同じ形を要求する）
+const str = (v, max) => (typeof v === 'string' ? v.slice(0, max) : '');
+const toNum = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : Number(v) || 0);
+const oneOf = (v, list, dflt) => (list.includes(v) ? v : dflt);
+const ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const cleanDate = (v) => (typeof v === 'string' && DATE_RE.test(v) ? v : '');
+
+function cleanPayment(p) {
+  if (!p || typeof p !== 'object' || !ID_RE.test(p.id)) return null;
+  const out = {
+    id: p.id,
+    date: cleanDate(p.date) || today(),
+    store: str(p.store, 100),
+    payer: oneOf(p.payer, ['a', 'b'], 'a'),
+    method: oneOf(p.method, Object.keys(METHODS), 'other'),
+    total: toNum(p.total),
+    memo: str(p.memo, 200),
+    items: (Array.isArray(p.items) ? p.items.slice(0, 300) : []).filter((it) => it && typeof it === 'object').map((it) => ({
+      id: ID_RE.test(it.id) ? it.id : uid(),
+      name: str(it.name, 100),
+      price: toNum(it.price),
+      owner: oneOf(it.owner, ['a', 'b', 'both'], 'both'),
+    })),
+    wholeOwner: oneOf(p.wholeOwner, ['a', 'b', 'both'], 'both'),
+    settled: p.settled === true,
+    deleted: p.deleted === true,
+    createdAt: toNum(p.createdAt),
+    updatedAt: toNum(p.updatedAt),
+  };
+  if (typeof p.ratio === 'number' && p.ratio >= 0 && p.ratio <= 100) out.ratio = p.ratio;
+  if (p.fixed && typeof p.fixed === 'object') out.fixed = { a: toNum(p.fixed.a) };
+  if (typeof p.paypayTxId === 'string' && p.paypayTxId) out.paypayTxId = p.paypayTxId.slice(0, 100);
+  return out;
+}
+
+function cleanSettlement(s) {
+  if (!s || typeof s !== 'object' || !ID_RE.test(s.id)) return null;
+  return {
+    id: s.id,
+    date: cleanDate(s.date) || today(),
+    ...(typeof s.month === 'string' && /^\d{4}-\d{2}$/.test(s.month) ? { month: s.month } : {}),
+    from: oneOf(s.from, ['a', 'b'], 'a'),
+    to: oneOf(s.to, ['a', 'b'], 'b'),
+    amount: toNum(s.amount),
+    paymentIds: (Array.isArray(s.paymentIds) ? s.paymentIds : []).filter((x) => ID_RE.test(x)).slice(0, 5000),
+    deleted: s.deleted === true,
+    updatedAt: toNum(s.updatedAt),
+  };
+}
+
+const cleanList = (list, fn) => (Array.isArray(list) ? list.map(fn).filter(Boolean) : []);
+
+function cleanSettings(s, cur) {
+  const names = (s && s.names) || {};
+  const ratio = s && typeof s.ratio === 'number' && s.ratio >= 0 && s.ratio <= 100 ? s.ratio : cur.ratio;
+  const rules = s && typeof s.rules === 'string' ? s.rules.slice(0, 20000) : cur.rules || '';
+  return { ...cur, names: { a: str(names.a, 20) || cur.names.a, b: str(names.b, 20) || cur.names.b }, ratio, rules };
+}
+
 function toast(msg) {
   const t = $('#toast');
   t.textContent = msg;
@@ -48,6 +115,10 @@ function toast(msg) {
   clearTimeout(toast.timer);
   toast.timer = setTimeout(() => t.classList.remove('show'), 2400);
 }
+
+let data = load();
+let draft = null;        // 編集中の支払い
+let photoDataUrl = null; // 縮小済みレシート画像
 
 // ===== 計算 =====
 // 1件の支払いについて、それぞれの負担額を返す。
@@ -207,11 +278,11 @@ function renderEntries(el, list, emptyMsg, selected = null, onToggle = null) {
   el.innerHTML = list.map((p) => {
     const bd = burden(p);
     const on = selected && selected.has(p.id);
-    return `<button class="entry${selected ? ' selectable' : ''}${on ? ' selected' : ''}" data-id="${p.id}"${selected ? ` aria-pressed="${on}"` : ''}>
+    return `<button class="entry${selected ? ' selectable' : ''}${on ? ' selected' : ''}" data-id="${esc(p.id)}"${selected ? ` aria-pressed="${on}"` : ''}>
       ${selected ? '<span class="check-zone" aria-hidden="true"><span class="check"></span></span>' : ''}
       <div style="min-width:0;flex:1">
         <div class="title">${esc(p.store || '（店名なし）')}</div>
-        <div class="meta"><span class="badge cell">${cellNos(p)}</span><span class="badge ${p.payer}">${esc(name(p.payer))}払い</span><span class="badge">${METHODS[p.method] || ''}</span><span class="nowrap">${esc(p.date)}${p.settled ? '・清算済' : ''}</span></div>
+        <div class="meta"><span class="badge cell">${cellNos(p)}</span><span class="badge ${esc(p.payer)}">${esc(name(p.payer))}払い</span><span class="badge">${METHODS[p.method] || ''}</span><span class="nowrap">${esc(p.date)}${p.settled ? '・清算済' : ''}</span></div>
       </div>
       <div class="amount">${yen(p.total)}<div class="meta">${esc(name('a'))} ${yen(bd.a)} / ${esc(name('b'))} ${yen(bd.b)}</div></div>
     </button>`;
@@ -370,7 +441,7 @@ function renderHistory() {
   el.innerHTML = sts.map((s) => `<div class="entry" style="cursor:default">
       <div><div class="title">${s.month ? monthLabel(s.month) + '分' : esc(s.date)}</div><div class="meta">${s.month ? esc(s.date) + '・' : ''}${s.paymentIds.length}件を清算</div></div>
       <div class="amount">${esc(name(s.from))} → ${esc(name(s.to))} ${yen(s.amount)}
-        <div><button class="btn tiny" data-undo="${s.id}">取り消す</button></div></div>
+        <div><button class="btn tiny" data-undo="${esc(s.id)}">取り消す</button></div></div>
     </div>`).join('');
   el.querySelectorAll('[data-undo]').forEach((b) => b.addEventListener('click', () => undoSettlement(b.dataset.undo)));
 }
@@ -598,7 +669,7 @@ function openEdit(id) {
 }
 
 function segment(el, options, value, onPick) {
-  el.innerHTML = options.map(([v, label]) => `<button type="button" data-v="${v}" class="${v === value ? 'on' : ''}">${esc(label)}</button>`).join('');
+  el.innerHTML = options.map(([v, label]) => `<button type="button" data-v="${esc(v)}" class="${v === value ? 'on' : ''}">${esc(label)}</button>`).join('');
   el.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
     el.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
     onPick(b.dataset.v);
@@ -637,7 +708,7 @@ const draftTotal = () => Number(draft.total) || draft.items.reduce((s, it) => s 
 function renderItems() {
   const el = $('#items');
   el.innerHTML = draft.items.map((it, i) => `
-    <div class="item" data-owner="${it.owner}" data-i="${i}">
+    <div class="item" data-owner="${esc(it.owner)}" data-i="${i}">
       <div class="item-top">
         <input class="name" type="text" value="${esc(it.name)}" placeholder="品名">
         <input class="price" type="number" inputmode="numeric" value="${esc(it.price)}" placeholder="0">
@@ -813,18 +884,36 @@ const RECEIPT_PROMPT = `このレシート画像を読み取り、夫婦で品�
 - total は実際に支払った税込の合計金額。
 - method は支払い方法の表記から判断（PayPay→paypay、クレジット/カード→credit、現金/お預り→cash、それ以外や不明→other）。`;
 
+// Claude API を直接呼ぶ（外部ライブラリを読み込まないことで、CDN 経由のコード改ざんで API キーが盗まれる経路をなくす）
+async function callClaude(apiKey, body) {
+  const res = await fetch(API_URL, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-beta': 'server-side-fallback-2026-07-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({ fallbacks: 'default', ...body }),
+  });
+  const response = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error((response.error && response.error.message) || `HTTP ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
+  return response;
+}
+
 async function aiRead() {
   const { apiKey, model } = data.settings;
   if (!apiKey) { toast('設定で API キーを入力してください'); show('settings'); return; }
   setBusy(true, 'Claude がレシートを読み取り中…');
   try {
-    const { default: Anthropic } = await import(SDK_URL);
-    const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
-    const response = await client.beta.messages.create({
+    const response = await callClaude(apiKey, {
       model: model || DEFAULT_MODEL,
       max_tokens: 16000,
-      betas: ['server-side-fallback-2026-07-01'],
-      fallbacks: 'default',
       output_config: { effort: 'medium', format: { type: 'json_schema', schema: RECEIPT_SCHEMA } },
       messages: [{
         role: 'user',
@@ -1079,8 +1168,6 @@ async function aiAssign() {
   $('#btn-imp-ai').disabled = true;
   status.textContent = `🤖 AI が ${targets.length}件を振り分け中…`;
   try {
-    const { default: Anthropic } = await import(SDK_URL);
-    const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
     const payer = impPayer();
     const system = `あなたは夫婦の家計簿アプリで、PayPay の支払い1件ごとに負担者を決める担当です。
 owner の値:
@@ -1102,11 +1189,9 @@ ${rules || '（未設定）'}`;
       past_assignments: ownerExamples(),
       transactions: targets.map(({ t, i }) => ({ i, date: t.date, store: t.store, kind: t.kind, method: t.way, amount: t.amount })),
     };
-    const response = await client.beta.messages.create({
+    const response = await callClaude(apiKey, {
       model: model || DEFAULT_MODEL,
       max_tokens: 16000,
-      betas: ['server-side-fallback-2026-07-01'],
-      fallbacks: 'default',
       system,
       output_config: { effort: 'low', format: { type: 'json_schema', schema: ASSIGN_SCHEMA } },
       messages: [{ role: 'user', content: `次の取引それぞれの owner を決めてください。\n${JSON.stringify(payload)}` }],
@@ -1151,7 +1236,7 @@ function renderImport() {
   el.innerHTML = impRows.map((t, i) => {
     const m = t.match && data.payments.find((p) => p.id === t.match);
     const note = [t.kind && t.kind !== '支払い' ? t.kind : '', t.way].filter(Boolean).join('・');
-    return `<div class="item" data-owner="${t.match ? 'linked' : t.owner}" data-i="${i}">
+    return `<div class="item" data-owner="${t.match ? 'linked' : esc(t.owner)}" data-i="${i}">
       <div class="imp-head"><div class="title">${esc(t.store || '（取引先なし）')}</div><div class="amount">${yen(t.amount)}</div></div>
       <div class="imp-note">${esc(t.date)}${note ? '・' + esc(note) : ''}</div>
       ${m ? `<div class="imp-note">✓ 記録済み「${esc(m.store || '店名なし')}」と同じ取引として紐づけます</div>` : '<div class="seg"></div>'}
@@ -1230,8 +1315,8 @@ const sharedSettings = () => ({ names: data.settings.names, ratio: data.settings
 
 function saveSettings() {
   const s = data.settings;
-  s.names.a = $('#s-name-a').value.trim() || '夫';
-  s.names.b = $('#s-name-b').value.trim() || '妻';
+  s.names.a = $('#s-name-a').value.trim().slice(0, 20) || '夫';
+  s.names.b = $('#s-name-b').value.trim().slice(0, 20) || '妻';
   s.ratio = Math.min(100, Math.max(0, Number($('#s-ratio').value) || 50));
   s.apiKey = $('#s-apikey').value.trim();
   s.model = $('#s-model').value.trim() || DEFAULT_MODEL;
@@ -1268,8 +1353,8 @@ async function importData(file) {
     const incoming = JSON.parse(await file.text());
     if (!Array.isArray(incoming.payments)) throw new Error('形式が違います');
     const before = livePayments().length;
-    data.payments = mergeById(data.payments, incoming.payments);
-    data.settlements = mergeById(data.settlements, incoming.settlements);
+    data.payments = mergeById(data.payments, cleanList(incoming.payments, cleanPayment));
+    data.settlements = mergeById(data.settlements, cleanList(incoming.settlements, cleanSettlement));
     save();
     push('payments', data.payments);
     push('settlements', data.settlements);
@@ -1281,14 +1366,15 @@ async function importData(file) {
 }
 
 // ===== 同期 =====
-const SYNC_LABEL = { connecting: '接続中…', synced: '同期済み', sending: '送信中…', offline: 'オフライン（後で送信）', error: '同期エラー' };
+const SYNC_LABEL = { connecting: '接続中…', synced: '同期済み', sending: '送信中…', offline: 'オフライン（後で送信）', error: '同期エラー', denied: 'この端末は共有から外れています（同期を解除して参加し直してください）' };
 
 function push(kind, recs) {
-  Sync.putMany(kind, recs);
+  Sync.putMany(kind, cleanList(recs, kind === 'payments' ? cleanPayment : cleanSettlement));
 }
 
 // クラウドから届いた記録を統合する。初回はクラウドに無い／古いローカル記録を送り返す。
-function onRemoteRecords(kind, remote, isFirst) {
+function onRemoteRecords(kind, raw, isFirst) {
+  const remote = cleanList(raw, kind === 'payments' ? cleanPayment : cleanSettlement);
   data[kind] = mergeById(data[kind], remote);
   if (isFirst) {
     const byId = new Map(remote.map((r) => [r.id, r]));
@@ -1299,10 +1385,7 @@ function onRemoteRecords(kind, remote, isFirst) {
 }
 
 function onRemoteSettings(rs) {
-  const s = data.settings;
-  if (rs.names) s.names = { ...s.names, ...rs.names };
-  if (typeof rs.ratio === 'number') s.ratio = rs.ratio;
-  if (typeof rs.rules === 'string') s.rules = rs.rules;
+  data.settings = cleanSettings(rs, data.settings);
   save();
   refreshView();
 }
@@ -1354,6 +1437,17 @@ async function syncJoin(code) {
   }
   $('#btn-sync-join').disabled = false;
   renderSync();
+}
+
+async function syncResetMembers() {
+  if (!confirm('共有に参加できる端末を、この端末だけにリセットしますか？\n（もう1台は同期が止まり、共有コードで参加し直せるようになります）')) return;
+  try {
+    await Sync.resetMembers();
+    toast('参加枠をリセットしました。もう1台で参加し直してください');
+  } catch (e) {
+    console.error(e);
+    toast('リセットできませんでした: ' + e.message);
+  }
 }
 
 function syncLeave() {
@@ -1458,6 +1552,7 @@ $('#btn-imp-save').addEventListener('click', saveImport);
 $('#btn-imp-ai').addEventListener('click', () => { impLoading = true; renderImport(); aiAssign(); });
 $('#btn-imp-rules').addEventListener('click', () => show('settings'));
 $('#btn-imp-cancel').addEventListener('click', () => show('home'));
+$('#btn-sync-reset').addEventListener('click', syncResetMembers);
 
 renderHome();
 Sync.init({ onRecords: onRemoteRecords, onSettings: onRemoteSettings, onStatus: renderSync }).then(() => {

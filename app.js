@@ -114,6 +114,7 @@ function show(view) {
   document.querySelectorAll('.view').forEach((v) => v.classList.toggle('active', v.id === 'view-' + view));
   document.querySelectorAll('.tabbar button').forEach((b) => b.classList.toggle('active', b.dataset.view === view));
   if (view === 'home') renderHome();
+  if (view !== 'history') histSel = null;
   if (view === 'history') renderHistory();
   if (view === 'settings') renderSettings();
   if (view === 'monthly') renderMonthly();
@@ -194,19 +195,71 @@ function settle(ym) {
 // ===== 履歴 =====
 const byDateDesc = (x, y) => (y.date || '').localeCompare(x.date || '') || (y.createdAt || 0) - (x.createdAt || 0);
 
-function renderEntries(el, list, emptyMsg) {
+// この記録が当てはまる6分類の番号（品目ごとに分けた記録は複数）
+function cellNos(p) {
+  const sp = split(p);
+  return CELLS.filter((c) => c.payer === (p.payer === 'b' ? 'b' : 'a') && sp[c.owner] > 0).map((c) => c.no).join('');
+}
+
+// selected を渡すと選択モード：タップで選択を切り替え、onToggle を呼ぶ
+function renderEntries(el, list, emptyMsg, selected = null, onToggle = null) {
   if (!list.length) { el.innerHTML = `<div class="empty">${emptyMsg}</div>`; return; }
   el.innerHTML = list.map((p) => {
     const bd = burden(p);
-    return `<button class="entry" data-id="${p.id}">
-      <div style="min-width:0">
+    const on = selected && selected.has(p.id);
+    return `<button class="entry${selected ? ' selectable' : ''}${on ? ' selected' : ''}" data-id="${p.id}"${selected ? ` aria-pressed="${on}"` : ''}>
+      ${selected ? '<span class="check" aria-hidden="true"></span>' : ''}
+      <div style="min-width:0;flex:1">
         <div class="title">${esc(p.store || '（店名なし）')}</div>
-        <div class="meta"><span class="badge ${p.payer}">${esc(name(p.payer))}払い</span><span class="badge">${METHODS[p.method] || ''}</span>${esc(p.date)}${p.settled ? '・清算済' : ''}</div>
+        <div class="meta"><span class="badge cell">${cellNos(p)}</span><span class="badge ${p.payer}">${esc(name(p.payer))}払い</span><span class="badge">${METHODS[p.method] || ''}</span><span class="nowrap">${esc(p.date)}${p.settled ? '・清算済' : ''}</span></div>
       </div>
       <div class="amount">${yen(p.total)}<div class="meta">${esc(name('a'))} ${yen(bd.a)} / ${esc(name('b'))} ${yen(bd.b)}</div></div>
     </button>`;
   }).join('');
-  el.querySelectorAll('.entry').forEach((b) => b.addEventListener('click', () => openEdit(b.dataset.id)));
+  el.querySelectorAll('.entry').forEach((b) => b.addEventListener('click', () => {
+    if (!selected) { openEdit(b.dataset.id); return; }
+    const id = b.dataset.id;
+    if (selected.has(id)) selected.delete(id); else selected.add(id);
+    b.classList.toggle('selected', selected.has(id));
+    b.setAttribute('aria-pressed', selected.has(id));
+    if (onToggle) onToggle();
+  }));
+}
+
+// ===== 履歴の一括変更 =====
+let histSel = null;      // 選択モード中は選んだ記録の id の Set
+let histVisible = [];    // いま一覧に出ている記録の id
+
+function updateHistBulk() {
+  const n = histSel ? histSel.size : 0;
+  $('#hist-bulk-n').textContent = n;
+  $('#btn-hist-apply').disabled = !n || !$('#hist-bulk-cell').value;
+  $('#btn-hist-all').textContent = n && n === histVisible.length ? '選択を解除' : 'すべて選択';
+}
+
+// 選んだ記録を指定の分類（払った人 × 誰のためか）にまとめて変更する
+function applyHistBulk() {
+  const c = CELLS.find((x) => x.key === $('#hist-bulk-cell').value);
+  if (!c || !histSel.size) return;
+  const targets = data.payments.filter((p) => histSel.has(p.id));
+  const settledN = targets.filter((p) => p.settled).length;
+  const owner = c.owner === 'shared' ? 'both' : c.owner;
+  let msg = `${targets.length}件を「${c.no} ${cellTitle(c)}」に変更しますか？\n品目ごとの割り当てと金額指定は、すべてこの分類に置き換わります。`;
+  if (settledN) msg += `\n\n清算済みの記録が${settledN}件含まれます。済んだ清算の金額は変わりません。`;
+  if (!confirm(msg)) return;
+  const now = Date.now();
+  for (const p of targets) {
+    p.payer = c.payer;
+    p.wholeOwner = owner;
+    p.items = (p.items || []).map((it) => ({ ...it, owner }));
+    delete p.fixed;
+    p.updatedAt = now;
+  }
+  save();
+  push('payments', targets);
+  toast(`${targets.length}件を${c.no}に変更しました`);
+  histSel = new Set();
+  renderHistory();
 }
 
 function renderHistory() {
@@ -222,7 +275,19 @@ function renderHistory() {
   let list = livePayments().filter((p) => filter === 'all' || !p.settled);
   if (c) list = list.filter((p) => p.payer === c.payer && split(p)[c.owner] > 0);
   list.sort(byDateDesc);
-  renderEntries($('#history-list'), list, c ? 'この分類の記録はありません' : '記録がありません');
+  histVisible = list.map((p) => p.id);
+  if (histSel) for (const id of [...histSel]) if (!histVisible.includes(id)) histSel.delete(id); // 絞り込みで見えなくなった分は外す
+  renderEntries($('#history-list'), list, c ? 'この分類の記録はありません' : '記録がありません', histSel, updateHistBulk);
+  $('#btn-hist-select').textContent = histSel ? '完了' : '選択';
+  $('#hist-select-tools').hidden = !histSel || !list.length;
+  $('#hist-bulk').hidden = !histSel;
+  if (histSel) {
+    const bulk = $('#hist-bulk-cell');
+    const cur = bulk.value;
+    bulk.innerHTML = '<option value="">分類を選ぶ</option>' + CELLS.map((x) => `<option value="${x.key}">${x.no} ${esc(cellTitle(x))}</option>`).join('');
+    bulk.value = cur;
+    updateHistBulk();
+  }
 
   // 絞り込み結果の合計。分類で絞ったときは、品目ごとに分けた記録のうちその分類の金額だけを数える
   const total = list.reduce((x, p) => x + (c ? split(p)[c.owner] : Number(p.total) || 0), 0);
@@ -1257,6 +1322,13 @@ $('#m-next').addEventListener('click', () => { curMonth = shiftMonth(curMonth, 1
 $('#m-list-clear').addEventListener('click', () => { mCell = null; renderMonthly(); });
 $('#history-filter').addEventListener('change', renderHistory);
 $('#history-cell').addEventListener('change', renderHistory);
+$('#btn-hist-select').addEventListener('click', () => { histSel = histSel ? null : new Set(); renderHistory(); });
+$('#btn-hist-all').addEventListener('click', () => {
+  histSel = histSel.size === histVisible.length ? new Set() : new Set(histVisible);
+  renderHistory();
+});
+$('#hist-bulk-cell').addEventListener('change', updateHistBulk);
+$('#btn-hist-apply').addEventListener('click', applyHistBulk);
 $('#photo-input').addEventListener('change', (e) => onPhoto(e.target.files[0]));
 $('#camera-input').addEventListener('change', (e) => onPhoto(e.target.files[0]));
 $('#btn-ai').addEventListener('click', aiRead);

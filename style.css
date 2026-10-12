@@ -310,3 +310,21 @@ textarea { resize: vertical; font: inherit; line-height: 1.5; }
 .fixed-wrap { margin-bottom: 6px; }
 .fixed-wrap label { display: block; font-size: 13px; color: var(--muted); }
 .dimmed { opacity: .45; }
+
+/* 履歴の一括変更 */
+.badge.cell { background: none; padding: 0 4px 0 0; color: var(--text); letter-spacing: 1px; }
+.hist-select-tools { margin-bottom: 8px; }
+.entry.selectable { justify-content: flex-start; }
+.entry .check { flex: none; width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--border); display: grid; place-items: center; }
+.entry.selected { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary) inset; }
+.entry.selected .check { background: var(--primary); border-color: var(--primary); }
+.entry.selected .check::after { content: ""; width: 6px; height: 11px; border: solid #fff; border-width: 0 2px 2px 0; transform: translateY(-1px) rotate(45deg); }
+.hist-bulk {
+  position: sticky; bottom: calc(68px + env(safe-area-inset-bottom)); z-index: 6; margin-top: 12px;
+  display: flex; align-items: center; gap: 8px; padding: 10px 12px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 4px 16px rgba(0,0,0,.12);
+}
+.hist-bulk-count { font-size: 13px; white-space: nowrap; }
+.hist-bulk select { min-width: 0; padding: 8px 10px; font-size: 14px; }
+.hist-bulk .btn { white-space: nowrap; }
+.nowrap { white-space: nowrap; }

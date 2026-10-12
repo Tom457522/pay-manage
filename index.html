@@ -142,7 +142,10 @@
 
     <!-- 履歴 -->
     <section id="view-history" class="view">
-      <h2 class="section-title">履歴</h2>
+      <div class="row between section-title">
+        <h2 style="margin:0">履歴</h2>
+        <button id="btn-hist-select" class="btn small">選択</button>
+      </div>
       <div class="row gap small-gap history-filters">
         <select id="history-filter" aria-label="清算の状態">
           <option value="unsettled">未清算のみ</option>
@@ -151,7 +154,16 @@
         <select id="history-cell" class="grow" aria-label="分類"></select>
       </div>
       <div id="history-summary" class="muted small history-summary"></div>
+      <div id="hist-select-tools" class="row between hist-select-tools" hidden>
+        <button id="btn-hist-all" class="btn tiny">すべて選択</button>
+        <span class="muted small">タップして選択</span>
+      </div>
       <div id="history-list" class="list"></div>
+      <div id="hist-bulk" class="hist-bulk" hidden>
+        <div class="hist-bulk-count"><strong id="hist-bulk-n">0</strong>件を</div>
+        <select id="hist-bulk-cell" class="grow" aria-label="変更先の分類"></select>
+        <button id="btn-hist-apply" class="btn primary small" disabled>に変更</button>
+      </div>
       <h2 class="section-title">清算の記録</h2>
       <div id="settlement-list" class="list"></div>
     </section>

@@ -148,10 +148,6 @@ select { width: auto; margin: 0; }
 /* ホーム */
 .balance-card { text-align: center; }
 .balance-text { font-size: 24px; font-weight: 800; margin: 6px 0; }
-.stats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.stat { font-weight: 700; }
-.stat.a { color: var(--a); }
-.stat.b { color: var(--b); }
 
 .list { display: flex; flex-direction: column; gap: 8px; }
 .entry {

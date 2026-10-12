@@ -233,10 +233,6 @@ function renderHome() {
         <button class="btn small primary" data-settle="${ym}">清算</button>
       </div>`).join('')}`;
   $('#settle-months').querySelectorAll('[data-settle]').forEach((b) => b.addEventListener('click', () => settle(b.dataset.settle)));
-  $('#paid-a').textContent = `${name('a')} ${yen(s.paidA)}`;
-  $('#paid-b').textContent = `${name('b')} ${yen(s.paidB)}`;
-  $('#burden-a').textContent = `${name('a')} ${yen(s.burdenA)}`;
-  $('#burden-b').textContent = `${name('b')} ${yen(s.burdenB)}`;
 
   const recent = [...livePayments()].sort(byDateDesc).slice(0, 5);
   renderEntries($('#recent-list'), recent, 'まだ記録がありません。「記録」から追加しましょう。');

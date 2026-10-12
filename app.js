@@ -682,6 +682,7 @@ const ownerOptions = () => [['a', name('a')], ['both', '共有'], ['b', name('b'
 
 function fillForm() {
   $('#f-date').value = draft.date;
+  $('#f-time').value = draft.time || '';
   $('#f-store').value = draft.store;
   $('#f-total').value = draft.total;
   $('#f-memo').value = draft.memo || '';
@@ -761,6 +762,8 @@ function updateSummary() {
 
 function readForm() {
   draft.date = $('#f-date').value || today();
+  const time = $('#f-time').value.slice(0, 5); // HH:MM（秒は使わない）
+  if (TIME_RE.test(time)) draft.time = time; else delete draft.time;
   draft.store = $('#f-store').value.trim();
   draft.memo = $('#f-memo').value.trim();
   draft.total = $('#f-total').value;
@@ -852,6 +855,7 @@ function applyReceipt(r) {
   readForm();
   if (r.store) draft.store = r.store;
   if (r.date) draft.date = r.date;
+  if (r.time && TIME_RE.test(r.time)) draft.time = r.time;
   if (r.total) draft.total = r.total;
   if (r.method && METHODS[r.method] && r.method !== 'other') draft.method = r.method;
   draft.items = (r.items || []).map((it) => ({ id: uid(), name: it.name, price: it.price, owner: 'both' }));
@@ -863,6 +867,7 @@ const RECEIPT_SCHEMA = {
   properties: {
     store: { type: 'string', description: '店名。不明なら空文字' },
     date: { type: 'string', description: 'YYYY-MM-DD。不明なら空文字' },
+    time: { type: 'string', description: '購入時刻 HH:MM（24時間表記）。不明なら空文字' },
     total: { type: 'integer', description: '実際に支払った税込合計（円）' },
     method: { type: 'string', enum: ['paypay', 'credit', 'cash', 'other'] },
     items: {
@@ -875,7 +880,7 @@ const RECEIPT_SCHEMA = {
       },
     },
   },
-  required: ['store', 'date', 'total', 'method', 'items'],
+  required: ['store', 'date', 'time', 'total', 'method', 'items'],
   additionalProperties: false,
 };
 
@@ -885,6 +890,7 @@ const RECEIPT_PROMPT = `このレシート画像を読み取り、夫婦で品�
 - 小計・合計・消費税・お預り・お釣り・ポイントなどの行は items に含めない。
 - price はレシートに印字された金額をそのまま使う（外税表記なら税抜のままでよい）。
 - total は実際に支払った税込の合計金額。
+- time はレシートに印字された購入時刻を24時間表記の HH:MM にする（午後3時5分なら 15:05）。
 - method は支払い方法の表記から判断（PayPay→paypay、クレジット/カード→credit、現金/お預り→cash、それ以外や不明→other）。`;
 
 // Claude API を直接呼ぶ（外部ライブラリを読み込まないことで、CDN 経由のコード改ざんで API キーが盗まれる経路をなくす）
@@ -965,9 +971,11 @@ function parseReceiptText(text) {
   const lines = text.split('\n').map((l) => l.replace(/[ 　]+/g, ' ').trim()).filter(Boolean);
   const z2h = (s) => s.replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
   const skip = /小計|合計|お?預|釣|税|点数|対象|クレジット|ポイント|残高|電話|TEL|領収|レジ|担当|No\.|支払|カード|PayPay/i;
-  const r = { store: '', date: '', total: 0, method: 'other', items: [] };
+  const r = { store: '', date: '', time: '', total: 0, method: 'other', items: [] };
   for (const raw of lines) {
     const line = z2h(raw);
+    const tm = line.match(/(?:^|[^\d])([01]?\d|2[0-3])\s*[:：時]\s*([0-5]\d)(?!\d)/);
+    if (tm && !r.time && /20\d{2}\s*[\/年.\-]/.test(line)) r.time = `${tm[1].padStart(2, '0')}:${tm[2]}`;
     const d = line.match(/(20\d{2})\s*[\/年.\-]\s*(\d{1,2})\s*[\/月.\-]\s*(\d{1,2})/);
     if (d && !r.date) r.date = `${d[1]}-${d[2].padStart(2, '0')}-${d[3].padStart(2, '0')}`;
     if (/paypay/i.test(line)) r.method = 'paypay';

@@ -1069,13 +1069,14 @@ function parsePayPayCsv(text) {
   const iNo = col((c) => c === '取引番号');
   if (iOut < 0) throw new Error('「出金金額」の列が見つかりません');
   return rows.slice(h + 1).map((r) => {
-    const m = String(r[iDate] || '').match(/(\d{4})[/-](\d{1,2})[/-](\d{1,2})/);
+    const m = String(r[iDate] || '').match(/(\d{4})[/-](\d{1,2})[/-](\d{1,2})(?:\s+(\d{1,2}):(\d{2}))?/);
     const date = m ? `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}` : '';
+    const time = m && m[4] ? `${m[4].padStart(2, '0')}:${m[5]}` : ''; // 取引日の時刻（HH:MM）。表示と並び順に使う
     const amount = num(r[iOut]);
     const store = String(r[iStore] ?? '').trim();
     const kind = String(r[iKind] ?? '').trim();
     const txId = String(r[iNo] ?? '').trim() || `${r[iDate]}|${amount}|${store}`;
-    return { txId, date, amount, store, kind, way: String(r[iWay] ?? '').trim() };
+    return { txId, date, time, amount, store, kind, way: String(r[iWay] ?? '').trim() };
   }).filter((t) => t.date && t.amount > 0);
 }
 
@@ -1108,7 +1109,7 @@ async function onCsv(file) {
     const skips = loadSkips();
     const fresh = all.filter((t) => !done.has(t.txId) && !skips.has(t.txId));
     impGen++;
-    impRows = fresh.sort((x, y) => y.date.localeCompare(x.date)).map((t) => ({ ...t, owner: guessOwner(t) }));
+    impRows = fresh.sort((x, y) => `${y.date} ${y.time}`.localeCompare(`${x.date} ${x.time}`)).map((t) => ({ ...t, owner: guessOwner(t) }));
     matchExisting();
     const hidden = all.length - fresh.length;
     $('#imp-status').textContent = `出金 ${all.length}件中 ${impRows.length}件が未取り込みです` + (hidden ? `（取り込み済み・除外済み ${hidden}件は非表示）` : '') + (impRows.length ? '。負担者を選んでください。' : '。');
@@ -1238,7 +1239,7 @@ function renderImport() {
     const note = [t.kind && t.kind !== '支払い' ? t.kind : '', t.way].filter(Boolean).join('・');
     return `<div class="item" data-owner="${t.match ? 'linked' : esc(t.owner)}" data-i="${i}">
       <div class="imp-head"><div class="title">${esc(t.store || '（取引先なし）')}</div><div class="amount">${yen(t.amount)}</div></div>
-      <div class="imp-note">${esc(t.date)}${note ? '・' + esc(note) : ''}</div>
+      <div class="imp-note">${esc(t.date)}${t.time ? ' ' + esc(t.time) : ''}${note ? '・' + esc(note) : ''}</div>
       ${m ? `<div class="imp-note">✓ 記録済み「${esc(m.store || '店名なし')}」と同じ取引として紐づけます</div>` : '<div class="seg"></div>'}
       ${!m && t.ai ? `<div class="imp-ai">🤖 ${esc(t.ai)}</div>` : ''}
     </div>`;

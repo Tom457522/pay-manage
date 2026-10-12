@@ -1074,11 +1074,14 @@ function parsePayPayCsv(text) {
   const iStore = col((c) => c === '取引先');
   const iWay = col((c) => c === '取引方法');
   const iNo = col((c) => c === '取引番号');
+  const iTime = col((c) => c !== '取引日' && /時刻|時間/.test(c)); // 時刻が別の列になっている場合
   if (iOut < 0) throw new Error('「出金金額」の列が見つかりません');
   return rows.slice(h + 1).map((r) => {
-    const m = String(r[iDate] || '').match(/(\d{4})[/-](\d{1,2})[/-](\d{1,2})(?:\s+(\d{1,2}):(\d{2}))?/);
+    // 「2026/10/12 12:34:56」「2026-10-12T12:34」「2026年10月12日 12時34分」などを受け付ける
+    const m = String(r[iDate] || '').match(/(\d{4})[/年.-](\d{1,2})[/月.-](\d{1,2})日?(?:[^\d]{0,6}?(\d{1,2})[:：時](\d{2}))?/);
     const date = m ? `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}` : '';
-    const time = m && m[4] ? `${m[4].padStart(2, '0')}:${m[5]}` : ''; // 取引日の時刻（HH:MM）。表示と並び順に使う
+    const tm = m && m[4] ? [m[4], m[5]] : String(iTime >= 0 ? r[iTime] ?? '' : '').match(/(\d{1,2})[:：時](\d{2})/)?.slice(1);
+    const time = tm && Number(tm[0]) < 24 ? `${tm[0].padStart(2, '0')}:${tm[1]}` : ''; // 取引の時刻（HH:MM）
     const amount = num(r[iOut]);
     const store = String(r[iStore] ?? '').trim();
     const kind = String(r[iKind] ?? '').trim();
@@ -1114,9 +1117,10 @@ function fillTimes(rows) {
   const now = Date.now();
   const changed = data.payments.filter((p) => p.paypayTxId && !p.time && byTx.has(p.paypayTxId));
   changed.forEach((p) => { p.time = byTx.get(p.paypayTxId); p.updatedAt = now; });
-  if (!changed.length) return;
+  if (!changed.length) return 0;
   save();
   push('payments', changed);
+  return changed.length;
 }
 
 async function onCsv(file) {
@@ -1124,14 +1128,16 @@ async function onCsv(file) {
   try {
     const all = parsePayPayCsv(await readCsvText(file));
     const done = new Set(data.payments.map((p) => p.paypayTxId).filter(Boolean));
-    fillTimes(all);
+    const filled = fillTimes(all);
     const skips = loadSkips();
     const fresh = all.filter((t) => !done.has(t.txId) && !skips.has(t.txId));
     impGen++;
     impRows = fresh.sort((x, y) => `${y.date} ${y.time}`.localeCompare(`${x.date} ${x.time}`)).map((t) => ({ ...t, owner: guessOwner(t) }));
     matchExisting();
     const hidden = all.length - fresh.length;
-    $('#imp-status').textContent = `出金 ${all.length}件中 ${impRows.length}件が未取り込みです` + (hidden ? `（取り込み済み・除外済み ${hidden}件は非表示）` : '') + (impRows.length ? '。負担者を選んでください。' : '。');
+    $('#imp-status').textContent = `出金 ${all.length}件中 ${impRows.length}件が未取り込みです` + (hidden ? `（取り込み済み・除外済み ${hidden}件は非表示）` : '') + (impRows.length ? '。負担者を選んでください。' : '。')
+      + (filled ? `
+取り込み済みの記録 ${filled}件に時刻を追加しました。` : '');
   } catch (e) {
     impRows = [];
     $('#imp-status').textContent = '⚠ ' + ((e && e.message) || '読み込みに失敗しました');

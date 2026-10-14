@@ -1,14 +1,102 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // 共有コード（households のドキュメントID）を知っている端末だけが読み書きできる。
-    // 一覧取得（list）を禁止しているので、コードを総当たりで探すことはできない。
+    // households/{共有コード}
+    //   共有コードを知っているだけでは読めない。コードを使って参加登録（members に端末IDを追加）した
+    //   最大2台の端末だけが読み書きできる。一覧取得（list）と削除は誰にもできない。
     match /households/{hid} {
-      allow get, create, update: if request.auth != null && hid.size() == 29;
+      function uid() { return request.auth.uid; }
+      function signedIn() { return request.auth != null; }
+      function members() { return resource.data.get('members', []); }
+      function isMember() { return signedIn() && uid() in members(); }
+      function newMembers() { return request.resource.data.get('members', []); }
+      function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
+
+      function validSettings(s) {
+        return s is map
+          && s.keys().hasOnly(['names', 'ratio', 'rules', 'csvMappings'])
+          && s.names is map && s.names.keys().hasOnly(['a', 'b'])
+          && s.names.get('a', '') is string && s.names.get('a', '').size() <= 20
+          && s.names.get('b', '') is string && s.names.get('b', '').size() <= 20
+          && s.ratio is number && s.ratio >= 0 && s.ratio <= 100
+          && s.get('rules', '') is string && s.get('rules', '').size() <= 20000
+          // 明細 CSV の列の対応（見出しの形ごとに最大30件）
+          && s.get('csvMappings', []) is list && s.get('csvMappings', []).size() <= 30;
+      }
+
+      allow get: if isMember();
       allow list, delete: if false;
 
-      match /{kind}/{id} {
-        allow read, write: if request.auth != null && kind in ['payments', 'settlements'];
+      // 作成：作った本人だけがメンバー
+      allow create: if signedIn()
+        && hid.size() == 29
+        && request.resource.data.keys().hasOnly(['createdAt', 'settings', 'members'])
+        && request.resource.data.createdAt is number
+        && validSettings(request.resource.data.settings)
+        && request.resource.data.members == [uid()];
+
+      allow update: if signedIn() && (
+        // メンバー：設定の変更と、参加枠の整理（今のメンバーを外すことだけ可。他人を追加は不可）
+        (isMember()
+          && changed().hasOnly(['settings', 'members'])
+          && (!('settings' in changed()) || validSettings(request.resource.data.settings))
+          && newMembers() is list
+          && members().toSet().hasAll(newMembers().toSet())
+          && newMembers().size() <= 2)
+        ||
+        // メンバー以外：空き枠があるときに、自分の端末IDを1つ追加することだけ可（＝参加）
+        (!isMember()
+          && changed().hasOnly(['members'])
+          && members().size() < 2
+          && newMembers() is list
+          && newMembers().toSet() == members().toSet().union([uid()].toSet())
+          && newMembers().size() == members().size() + 1)
+      );
+
+      function householdMember() {
+        return signedIn()
+          && uid() in get(/databases/$(database)/documents/households/$(hid)).data.get('members', []);
+      }
+      function okString(d, k, max) { return d.get(k, '') is string && d.get(k, '').size() <= max; }
+      function okNumber(d, k) { return d.get(k, 0) is number; }
+      function okBool(d, k) { return d.get(k, false) is bool; }
+      function oneOf(d, k, list) { return !(k in d) || d[k] in list; }
+
+      function validPayment(id) {
+        let d = request.resource.data;
+        return d.keys().hasOnly(['id', 'date', 'store', 'payer', 'method', 'total', 'memo', 'items',
+                                 'wholeOwner', 'ratio', 'settled', 'deleted', 'createdAt', 'updatedAt',
+                                 'fixed', 'paypayTxId', 'time'])
+          && d.id == id
+          && okString(d, 'date', 10) && okString(d, 'store', 100) && okString(d, 'memo', 200)
+          && d.payer in ['a', 'b']
+          && oneOf(d, 'method', ['paypay', 'credit', 'cash', 'other'])
+          && oneOf(d, 'wholeOwner', ['a', 'b', 'both'])
+          && okNumber(d, 'total') && okNumber(d, 'ratio') && okNumber(d, 'createdAt') && okNumber(d, 'updatedAt')
+          && okBool(d, 'settled') && okBool(d, 'deleted')
+          && d.get('items', []) is list && d.get('items', []).size() <= 300
+          && okString(d, 'paypayTxId', 100) && okString(d, 'time', 5)
+          && (!('fixed' in d) || (d.fixed is map && d.fixed.keys().hasOnly(['a']) && d.fixed.get('a', 0) is number));
+      }
+
+      function validSettlement(id) {
+        let d = request.resource.data;
+        return d.keys().hasOnly(['id', 'date', 'month', 'from', 'to', 'amount', 'paymentIds', 'deleted', 'updatedAt'])
+          && d.id == id
+          && okString(d, 'date', 10) && okString(d, 'month', 7)
+          && d.from in ['a', 'b'] && d.to in ['a', 'b']
+          && okNumber(d, 'amount') && okNumber(d, 'updatedAt') && okBool(d, 'deleted')
+          && d.get('paymentIds', []) is list && d.get('paymentIds', []).size() <= 5000;
+      }
+
+      // 記録は「削除フラグ」で消すので、ドキュメント自体の削除は不要
+      match /payments/{id} {
+        allow read: if householdMember();
+        allow create, update: if householdMember() && validPayment(id);
+      }
+      match /settlements/{id} {
+        allow read: if householdMember();
+        allow create, update: if householdMember() && validSettlement(id);
       }
     }
   }

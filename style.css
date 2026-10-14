@@ -88,17 +88,17 @@ main { max-width: 640px; margin: 0 auto; padding: 16px; }
 .btn.tiny { padding: 4px 10px; font-size: 13px; }
 
 .form label, label.block { display: block; font-size: 13px; color: var(--muted); margin-bottom: 12px; }
-input[type=text], input[type=number], input[type=date], input[type=password], select, textarea {
+input[type=text], input[type=number], input[type=date], input[type=time], input[type=password], select, textarea {
   display: block; width: 100%; margin-top: 4px; padding: 10px 12px; font-size: 16px;
   border: 1px solid var(--border); border-radius: 10px; background: var(--bg); color: var(--text);
   font-family: inherit;
 }
 /* 1行の入力欄は高さを揃える（iOS Safari の日付欄は独自の高さ・最小幅を持つため打ち消す） */
-input[type=text], input[type=number], input[type=date], input[type=password] {
+input[type=text], input[type=number], input[type=date], input[type=time], input[type=password] {
   -webkit-appearance: none; appearance: none; height: 46px; min-width: 0; line-height: 1.25;
 }
-input[type=date]::-webkit-date-and-time-value { text-align: left; margin: 0; }
-input[type=date]::-webkit-calendar-picker-indicator { margin: 0; opacity: .6; }
+input[type=date]::-webkit-date-and-time-value, input[type=time]::-webkit-date-and-time-value { text-align: left; margin: 0; }
+input[type=date]::-webkit-calendar-picker-indicator, input[type=time]::-webkit-calendar-picker-indicator { margin: 0; opacity: .6; }
 select { width: auto; margin: 0; }
 .grid2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
 .field-label { font-size: 13px; color: var(--muted); margin-bottom: 4px; }
@@ -148,10 +148,6 @@ select { width: auto; margin: 0; }
 /* ホーム */
 .balance-card { text-align: center; }
 .balance-text { font-size: 24px; font-weight: 800; margin: 6px 0; }
-.stats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.stat { font-weight: 700; }
-.stat.a { color: var(--a); }
-.stat.b { color: var(--b); }
 
 .list { display: flex; flex-direction: column; gap: 8px; }
 .entry {

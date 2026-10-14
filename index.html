@@ -4,9 +4,12 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#2f6fed">
+  <!-- 読み込み・通信できる相手を限定する（万一不正なスクリプトが紛れても外部へ送信しにくくする） -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://www.gstatic.com 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' https://api.anthropic.com https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://cdn.jsdelivr.net data:; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
   <title>ふたり精算</title>
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=20261014a">
 </head>
 <body>
   <header class="topbar">
@@ -25,14 +28,6 @@
       </div>
 
       <button class="btn full import-entry" data-open-import>📄 明細 CSV を取り込む（PayPay・カードなど）</button>
-
-      <div class="card">
-        <h2>未清算の内訳</h2>
-        <div class="stats">
-          <div><span class="muted small">支払った額</span><div id="paid-a" class="stat a"></div><div id="paid-b" class="stat b"></div></div>
-          <div><span class="muted small">負担すべき額</span><div id="burden-a" class="stat a"></div><div id="burden-b" class="stat b"></div></div>
-        </div>
-      </div>
 
       <h2 class="section-title">最近の記録</h2>
       <div id="recent-list" class="list"></div>
@@ -63,8 +58,9 @@
       <div class="card form">
         <div class="grid2">
           <label>日付<input type="date" id="f-date"></label>
-          <label>お店<input type="text" id="f-store" placeholder="スーパー○○"></label>
+          <label>時刻（任意）<input type="time" id="f-time"></label>
         </div>
+        <label>お店<input type="text" id="f-store" placeholder="スーパー○○"></label>
         <div class="field-label">払った人</div>
         <div class="seg" id="f-payer"></div>
         <div class="field-label">支払い方法</div>
@@ -261,11 +257,14 @@
             <button id="btn-sync-copy" class="btn grow">招待リンクをコピー</button>
             <button id="btn-sync-leave" class="btn danger grow">同期を解除</button>
           </div>
+          <p class="muted small" style="margin-top:12px">共有コードを使えるのは最初に参加した2台だけです。機種変更などでもう1台が参加し直せない時は、こちらでリセットしてください。</p>
+          <button id="btn-sync-reset" class="btn full">参加枠をリセット</button>
         </div>
       </div>
       <div class="card form">
         <h2>AIレシート読み取り</h2>
         <p class="muted small">Anthropic の API キーを設定すると、Claude がレシートを品目ごとに読み取ります。キーはこの端末のブラウザ内にだけ保存されます。</p>
+        <p class="muted small">万一に備え、このアプリ専用のキーを作り、Anthropic Console で月の利用上限を低め（例：$5）に設定しておくことをおすすめします。</p>
         <label>API キー<input type="password" id="s-apikey" placeholder="sk-ant-..." autocomplete="off"></label>
         <label>モデル<input type="text" id="s-model"></label>
       </div>
@@ -296,9 +295,9 @@
 
   <div id="toast" class="toast"></div>
 
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js" defer></script>
-  <script src="firebase-config.js" defer></script>
-  <script src="sync.js" defer></script>
-  <script src="app.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js" integrity="sha384-GJqSu7vueQ9qN0E9yLPb3Wtpd7OrgK8KmYzC8T1IysG1bcvxvIO4qtYR/D3A991F" crossorigin="anonymous" defer></script>
+  <script src="firebase-config.js?v=20261014a" defer></script>
+  <script src="sync.js?v=20261014a" defer></script>
+  <script src="app.js?v=20261014a" defer></script>
 </body>
 </html>

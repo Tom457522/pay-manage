@@ -332,3 +332,11 @@ textarea { resize: vertical; font: inherit; line-height: 1.5; }
 .hist-bulk select { min-width: 0; padding: 8px 10px; font-size: 14px; }
 .hist-bulk .btn { white-space: nowrap; }
 .nowrap { white-space: nowrap; }
+
+/* 明細 CSV：読み込み元と列の選択 */
+.imp-source { margin-top: 12px; }
+.imp-source .row { margin-bottom: 8px; }
+.imp-map select { display: block; width: 100%; margin-top: 4px; }
+.map-preview { margin: 4px 0 8px; }
+.map-row { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; font-size: 13px; padding: 4px 0; border-bottom: 1px solid var(--border); }
+.map-row span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -24,7 +24,7 @@
         <div id="settle-months" class="settle-months"></div>
       </div>
 
-      <button class="btn full import-entry" data-open-import>📄 PayPay の履歴（CSV）を取り込む</button>
+      <button class="btn full import-entry" data-open-import>📄 明細 CSV を取り込む（PayPay・カードなど）</button>
 
       <div class="card">
         <h2>未清算の内訳</h2>
@@ -57,7 +57,7 @@
           <button id="btn-ocr" class="btn grow" disabled>簡易OCR</button>
         </div>
         <div id="ocr-status" class="muted small status"></div>
-        <button class="btn small full import-entry" data-open-import>📄 PayPay の履歴（CSV）からまとめて取り込む</button>
+        <button class="btn small full import-entry" data-open-import>📄 明細 CSV からまとめて取り込む</button>
       </div>
 
       <div class="card form">
@@ -112,18 +112,36 @@
       <button id="btn-delete" class="btn danger full" hidden>この記録を削除</button>
     </section>
 
-    <!-- PayPay CSV 取り込み -->
+    <!-- 明細 CSV 取り込み -->
     <section id="view-import" class="view">
       <div class="card form">
-        <h2>PayPay の履歴を取り込む</h2>
-        <p class="muted small">PayPay アプリの「取引履歴」→ 右上のダウンロードボタンで期間を選んで CSV を保存し、ここで選んでください。取り込み済みの取引は表示されません。</p>
-        <div class="field-label">払った人（この CSV の持ち主）</div>
+        <h2>明細 CSV を取り込む</h2>
+        <p class="muted small">PayPay の取引履歴や、カード会社・銀行の利用明細の CSV を選んでください。日付・お店・金額の列を自動で見つけます。取り込み済みの取引は表示されません。</p>
+        <div class="field-label">払った人（この明細の持ち主）</div>
         <div class="seg" id="imp-payer"></div>
         <label class="btn primary full">CSV ファイルを選ぶ<input type="file" id="csv-input" accept=".csv,text/csv,text/comma-separated-values" hidden></label>
+        <div id="imp-source" class="imp-source" hidden>
+          <div class="row between"><span id="imp-source-label" class="small"></span><button id="btn-imp-remap" class="btn tiny">列を設定し直す</button></div>
+          <div class="field-label">支払い方法</div>
+          <div class="seg wrap" id="imp-method"></div>
+        </div>
         <div id="imp-status" class="muted small status"></div>
         <div class="row gap" id="imp-ai-row" hidden>
           <button id="btn-imp-ai" class="btn grow">🤖 AIで振り分け直す</button>
           <button id="btn-imp-rules" class="btn small">ルール</button>
+        </div>
+      </div>
+      <div id="imp-map" class="card form imp-map" hidden>
+        <h2>列を選ぶ</h2>
+        <label>見出しの行<select id="map-head"></select></label>
+        <label>日付の列<select id="map-date"></select></label>
+        <label>お店の列<select id="map-store"></select></label>
+        <label>金額の列<select id="map-amount"></select></label>
+        <div id="map-preview" class="map-preview"></div>
+        <p class="muted small">この設定は覚えておき、同じ形の CSV は次から自動で読み込みます（ふたりの端末で共有）。</p>
+        <div class="row gap">
+          <button id="btn-map-cancel" class="btn grow">閉じる</button>
+          <button id="btn-map-apply" class="btn primary grow" disabled>読み込む</button>
         </div>
       </div>
       <div id="imp-bulk" class="row gap small-gap bulk" hidden>
@@ -253,7 +271,7 @@
       </div>
       <div class="card form">
         <h2>AI振り分けルール</h2>
-        <p class="muted small">PayPay の履歴を取り込んだとき、このルールに沿って AI が負担者（または除外）を自動で選びます。ふたりの端末で共有されます。空欄なら過去の記録だけを参考にします。</p>
+        <p class="muted small">明細 CSV を取り込んだとき、このルールに沿って AI が負担者（または除外）を自動で選びます。ふたりの端末で共有されます。空欄なら過去の記録だけを参考にします。</p>
         <label>ルール<textarea id="s-rules" rows="7" placeholder="例：&#10;・スーパー、ドラッグストア、コンビニは共有&#10;・ユニクロ、美容院は夫&#10;・カフェで1,000円未満は払った人のもの&#10;・送金は除外"></textarea></label>
       </div>
       <div class="card form">

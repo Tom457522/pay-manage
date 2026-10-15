@@ -1,19 +1,21 @@
 'use strict';
 
-// Firebase (Firestore) による2台間の自動同期。
+// Firebase (Firestore) による端末間の自動同期。
 // データ構造: households/{共有コード} に設定、その下の payments / settlements に記録を1件1ドキュメントで保存。
-// 共有コードは推測困難なランダム文字列。コードを使って参加した端末（最大2台）だけが読み書きできる（firestore.rules 参照）。
+// 共有コードは推測困難なランダム文字列。コードを使って参加した端末（最大 MAX_MEMBERS 台）だけが読み書きできる（firestore.rules 参照）。
 const Sync = (() => {
   const BASE = 'https://www.gstatic.com/firebasejs/13.0.0/';
   const HID_KEY = 'futari-seisan-household';
   const MEMBER_KEY = 'futari-seisan-member'; // 参加登録済みの「共有コード:端末ID」
   const KINDS = ['payments', 'settlements'];
+  const MAX_MEMBERS = 4; // firestore.rules の上限と合わせる
 
   let fb = null;        // { fs: firestore モジュール, db, uid }
   let hid = null;
   let unsubs = [];
   let handlers = {};
   let status = 'off';
+  let memberCount = 0;  // 参加中の端末数（設定画面に表示）
 
   const configured = () => !!window.FIREBASE_CONFIG;
   const householdId = () => hid;
@@ -92,6 +94,7 @@ const Sync = (() => {
     }
     unsubs.push(fs.onSnapshot(fs.doc(db, 'households', hid), (snap) => {
       const d = snap.data();
+      if (d && Array.isArray(d.members)) memberCount = d.members.length;
       if (d && d.settings) handlers.onSettings(d.settings);
     }, (err) => console.error(err)));
   }
@@ -104,14 +107,14 @@ const Sync = (() => {
   }
 
   // 共有メンバー（members）に自分の端末IDを登録する。
-  // ルール上、登録できるのは「すでにメンバー」か「空き枠（2台まで）がある」場合だけ。
+  // ルール上、登録できるのは「すでにメンバー」か「空き枠（MAX_MEMBERS 台まで）がある」場合だけ。
   async function register() {
     const { fs, db } = fb;
     try {
       await fs.updateDoc(fs.doc(db, 'households', hid), { members: fs.arrayUnion(fb.uid) });
     } catch (e) {
       if (e && (e.code === 'permission-denied' || e.code === 'not-found')) {
-        const err = new Error('コードが違うか、すでに2台が参加しています（もう1台の設定で「参加枠をリセット」すると参加できます）');
+        const err = new Error(`コードが違うか、すでに${MAX_MEMBERS}台が参加しています（参加中の端末の設定で「参加枠をリセット」すると参加できます）`);
         err.denied = true;
         throw err;
       }
@@ -206,5 +209,5 @@ const Sync = (() => {
       .catch((e) => { console.error(e); setStatus('error'); });
   }
 
-  return { configured, active, householdId, init, create, join, leave, resetMembers, putMany, putSettings, normalize, status: () => status };
+  return { configured, active, householdId, init, create, join, leave, resetMembers, putMany, putSettings, normalize, status: () => status, members: () => memberCount, MAX_MEMBERS };
 })();

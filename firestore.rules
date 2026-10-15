@@ -3,7 +3,7 @@ service cloud.firestore {
   match /databases/{database}/documents {
     // households/{共有コード}
     //   共有コードを知っているだけでは読めない。コードを使って参加登録（members に端末IDを追加）した
-    //   最大2台の端末だけが読み書きできる。一覧取得（list）と削除は誰にもできない。
+    //   最大4台の端末（ふたり × スマホ・パソコンなど）だけが読み書きできる。一覧取得（list）と削除は誰にもできない。
     match /households/{hid} {
       function uid() { return request.auth.uid; }
       function signedIn() { return request.auth != null; }
@@ -42,12 +42,12 @@ service cloud.firestore {
           && (!('settings' in changed()) || validSettings(request.resource.data.settings))
           && newMembers() is list
           && members().toSet().hasAll(newMembers().toSet())
-          && newMembers().size() <= 2)
+          && newMembers().size() <= 4)
         ||
         // メンバー以外：空き枠があるときに、自分の端末IDを1つ追加することだけ可（＝参加）
         (!isMember()
           && changed().hasOnly(['members'])
-          && members().size() < 2
+          && members().size() < 4
           && newMembers() is list
           && newMembers().toSet() == members().toSet().union([uid()].toSet())
           && newMembers().size() == members().size() + 1)

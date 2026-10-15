@@ -1589,7 +1589,7 @@ function renderSettings() {
   renderSync();
 }
 
-// 2台で共有する設定（API キーは含めない）
+// 参加中の端末で共有する設定（API キーは含めない）
 const sharedSettings = () => ({ names: data.settings.names, ratio: data.settings.ratio, rules: data.settings.rules || '', csvMappings: data.settings.csvMappings || [] });
 
 function saveSettings() {
@@ -1685,6 +1685,7 @@ function renderSync() {
   $('#sync-linked').hidden = !linked;
   $('#sync-code').value = Sync.householdId() || '';
   $('#sync-status-text').textContent = SYNC_LABEL[st] || '';
+  $('#sync-members').textContent = Sync.members() ? `${Sync.members()}台（最大${Sync.MAX_MEMBERS}台）` : '';
   const badge = $('#sync-badge');
   badge.hidden = !SYNC_LABEL[st];
   badge.dataset.s = st;
@@ -1719,10 +1720,10 @@ async function syncJoin(code) {
 }
 
 async function syncResetMembers() {
-  if (!confirm('共有に参加できる端末を、この端末だけにリセットしますか？\n（もう1台は同期が止まり、共有コードで参加し直せるようになります）')) return;
+  if (!confirm('共有に参加できる端末を、この端末だけにリセットしますか？\n（ほかの端末は同期が止まり、共有コードで参加し直せるようになります）')) return;
   try {
     await Sync.resetMembers();
-    toast('参加枠をリセットしました。もう1台で参加し直してください');
+    toast('参加枠をリセットしました。ほかの端末で参加し直してください');
   } catch (e) {
     console.error(e);
     toast('リセットできませんでした: ' + e.message);
@@ -1742,7 +1743,7 @@ async function copyInvite() {
     await navigator.clipboard.writeText(url);
     toast('招待リンクをコピーしました');
   } catch {
-    prompt('このリンクをもう1人に送ってください', url);
+    prompt('このリンクを参加させたい端末（もう1人のスマホやパソコン）で開いてください', url);
   }
 }
 

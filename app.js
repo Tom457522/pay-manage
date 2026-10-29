@@ -896,25 +896,88 @@ const RECEIPT_PROMPT = `このレシート画像を読み取り、夫婦で品�
 - method は支払い方法の表記から判断（PayPay→paypay、クレジット/カード→credit、現金/お預り→cash、それ以外や不明→other）。`;
 
 // Claude API を直接呼ぶ（外部ライブラリを読み込まないことで、CDN 経由のコード改ざんで API キーが盗まれる経路をなくす）
-async function callClaude(apiKey, body) {
-  const res = await fetch(API_URL, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-beta': 'server-side-fallback-2026-07-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
-    },
-    body: JSON.stringify({ fallbacks: 'default', ...body }),
-  });
-  const response = await res.json().catch(() => ({}));
+// Claude API を呼ぶ。応答はストリーミング（SSE）で少しずつ受け取る。
+// 一括で待つ方式だと、読み取りに時間がかかったときに無通信の接続が途中で切られ
+// 「Failed to fetch」になることがあるため。戻り値は一括の応答と同じ形（stop_reason・content）。
+// onProgress(受信した文字数) で進み具合を知らせる。通信が切れたときは1回だけやり直す。
+async function callClaude(apiKey, body, onProgress) {
+  try {
+    return await streamClaude(apiKey, body, onProgress);
+  } catch (e) {
+    if (!e.network) throw e;
+    console.warn('Claude API の通信が切れたため再試行します', e);
+    try {
+      return await streamClaude(apiKey, body, onProgress);
+    } catch (e2) {
+      if (e2.network) e2.message = '通信が途中で切れました。電波の良い場所で、画面を開いたまま再度お試しください';
+      throw e2;
+    }
+  }
+}
+
+async function streamClaude(apiKey, body, onProgress) {
+  let res;
+  try {
+    res = await fetch(API_URL, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-beta': 'server-side-fallback-2026-07-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify({ fallbacks: 'default', ...body, stream: true }),
+    });
+  } catch (e) {
+    throw Object.assign(new Error(e.message || 'Failed to fetch'), { network: true });
+  }
   if (!res.ok) {
-    const err = new Error((response.error && response.error.message) || `HTTP ${res.status}`);
+    const r = await res.json().catch(() => ({}));
+    const err = new Error((r.error && r.error.message) || `HTTP ${res.status}`);
     err.status = res.status;
     throw err;
   }
-  return response;
+  // SSE を読み、text ブロックの文字を順につなげる。安全上の理由で途中から別モデルに
+  // 切り替わった場合も、続きは同じストリームで届く（切り替わり前の text も続きの一部）。
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  const blocks = [];
+  let buf = '', stop = null, stopDetails = null, received = 0;
+  const handle = (ev) => {
+    if (ev.type === 'content_block_start') blocks[ev.index] = { type: ev.content_block.type, text: ev.content_block.text || '' };
+    else if (ev.type === 'content_block_delta' && ev.delta.type === 'text_delta' && blocks[ev.index]) {
+      blocks[ev.index].text += ev.delta.text;
+      received += ev.delta.text.length;
+      if (onProgress) onProgress(received);
+    } else if (ev.type === 'message_delta' && ev.delta) {
+      if (ev.delta.stop_reason) stop = ev.delta.stop_reason;
+      if (ev.delta.stop_details) stopDetails = ev.delta.stop_details;
+    } else if (ev.type === 'error') {
+      const err = new Error((ev.error && ev.error.message) || 'AI の応答でエラーが起きました');
+      err.status = ev.error && ev.error.type === 'overloaded_error' ? 529 : undefined;
+      throw err;
+    }
+  };
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf('\n\n')) >= 0) {
+        const chunk = buf.slice(0, i);
+        buf = buf.slice(i + 2);
+        const data = chunk.split('\n').filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trim()).join('');
+        if (data) handle(JSON.parse(data));
+      }
+    }
+  } catch (e) {
+    if (e instanceof SyntaxError || e.status !== undefined || /AI の応答/.test(e.message)) throw e;
+    throw Object.assign(new Error(e.message || 'network error'), { network: true });
+  }
+  if (!stop) throw Object.assign(new Error('応答が途中で終わりました'), { network: true });
+  return { stop_reason: stop, stop_details: stopDetails, content: blocks.filter((b) => b && b.type === 'text') };
 }
 
 async function aiRead() {
@@ -933,7 +996,7 @@ async function aiRead() {
           { type: 'text', text: RECEIPT_PROMPT },
         ],
       }],
-    });
+    }, (n) => { $('#ocr-status').textContent = `Claude がレシートを読み取り中…（受信 ${n} 文字）`; });
     if (response.stop_reason === 'refusal') throw new Error('この画像は読み取れませんでした');
     if (response.stop_reason === 'max_tokens') throw new Error('出力が途中で切れました。もう一度お試しください');
     const text = response.content.filter((b) => b.type === 'text').map((b) => b.text).join('');
@@ -944,7 +1007,7 @@ async function aiRead() {
     console.error(e);
     const status = e && e.status;
     const msg = status === 401 ? 'API キーが正しくありません'
-      : status === 429 ? '混雑しています。少し待って再度お試しください'
+      : status === 429 || status === 529 ? '混雑しています。少し待って再度お試しください'
       : (e && e.message) || '読み取りに失敗しました';
     setBusy(false, '⚠ ' + msg);
   }
@@ -1492,7 +1555,7 @@ ${rules || '（未設定）'}`;
     if (gen !== impGen) return;
     const st = e && e.status;
     const msg = st === 401 ? 'API キーが正しくありません'
-      : st === 429 ? '混雑しています。少し待って「AIで振り分け直す」を押してください'
+      : st === 429 || st === 529 ? '混雑しています。少し待って「AIで振り分け直す」を押してください'
       : (e && e.message) || 'AI 振り分けに失敗しました';
     status.textContent = `${before}\n⚠ ${msg}（前回と同じお店の割り当てを初期値にしています）`;
   }

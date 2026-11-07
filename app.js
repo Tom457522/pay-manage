@@ -278,12 +278,15 @@ function cellNos(p) {
 }
 
 // selected を渡すと選択モード：タップで選択を切り替え、onToggle を呼ぶ
-function renderEntries(el, list, emptyMsg, selected = null, onToggle = null) {
+// dayHead を渡すと、日付が変わるところに dayHead(日付, その日の記録) の見出しを入れる（list は日付順の前提）
+function renderEntries(el, list, emptyMsg, selected = null, onToggle = null, dayHead = null) {
   if (!list.length) { el.innerHTML = `<div class="empty">${emptyMsg}</div>`; return; }
-  el.innerHTML = list.map((p) => {
+  el.innerHTML = list.map((p, i) => {
+    const head = dayHead && (i === 0 || list[i - 1].date !== p.date)
+      ? dayHead(p.date, list.filter((x) => x.date === p.date)) : '';
     const bd = burden(p);
     const on = selected && selected.has(p.id);
-    return `<button class="entry${selected ? ' selectable' : ''}${on ? ' selected' : ''}" data-id="${esc(p.id)}"${selected ? ` aria-pressed="${on}"` : ''}>
+    return `${head}<button class="entry${selected ? ' selectable' : ''}${on ? ' selected' : ''}" data-id="${esc(p.id)}"${selected ? ` aria-pressed="${on}"` : ''}>
       ${selected ? '<span class="check-zone" aria-hidden="true"><span class="check"></span></span>' : ''}
       <div style="min-width:0;flex:1">
         <div class="title">${esc(p.store || '（店名なし）')}</div>
@@ -409,6 +412,41 @@ function applyHistBulk() {
   renderHistory();
 }
 
+// 履歴の期間：全期間 / 月ごと / 日ごと
+let histPeriod = 'all';
+let histMonth = today().slice(0, 7); // YYYY-MM
+let histDay = today();               // YYYY-MM-DD
+
+function shiftDay(ymd, delta) {
+  const [y, m, d] = ymd.split('-').map(Number);
+  return new Date(y, m - 1, d + delta).toLocaleDateString('sv-SE');
+}
+const WEEK = ['日', '月', '火', '水', '木', '金', '土'];
+function dayLabel(ymd, withYear = false) {
+  const [y, m, d] = (ymd || '').split('-').map(Number);
+  if (!y || !m || !d) return '日付なし';
+  const w = WEEK[new Date(y, m - 1, d).getDay()];
+  return `${withYear || y !== Number(today().slice(0, 4)) ? y + '年' : ''}${m}月${d}日（${w}）`;
+}
+
+function setHistPeriod(mode) {
+  if (mode === histPeriod) return;
+  if (mode === 'day' && histPeriod === 'month' && !histDay.startsWith(histMonth)) {
+    // 月から日に切り替えたら、その月のいちばん新しい記録の日（なければ1日、今月なら今日）
+    const ds = livePayments().map((p) => p.date || '').filter((d) => d.startsWith(histMonth)).sort();
+    histDay = histMonth === today().slice(0, 7) ? today() : ds.length ? ds[ds.length - 1] : histMonth + '-01';
+  }
+  if (mode === 'month' && histPeriod === 'day') histMonth = histDay.slice(0, 7);
+  histPeriod = mode;
+  renderHistory();
+}
+
+function shiftHist(delta) {
+  if (histPeriod === 'month') histMonth = shiftMonth(histMonth, delta);
+  else if (histPeriod === 'day') histDay = shiftDay(histDay, delta);
+  renderHistory();
+}
+
 function renderHistory() {
   const filter = $('#history-filter').value;
   // 6分類の選択肢（名前が変わることがあるので毎回作る）
@@ -419,12 +457,26 @@ function renderHistory() {
   sel.value = CELLS.some((c) => c.key === cur) ? cur : '';
   const c = CELLS.find((x) => x.key === sel.value);
 
+  document.querySelectorAll('.hist-period button').forEach((b) => b.classList.toggle('on', b.dataset.period === histPeriod));
+  $('#hist-nav').hidden = histPeriod === 'all';
+  $('#hist-label').hidden = histPeriod === 'day';
+  $('#hist-day').hidden = histPeriod !== 'day';
+  if (histPeriod === 'month') $('#hist-label').textContent = monthLabel(histMonth);
+  if (histPeriod === 'day') $('#hist-day').value = histDay;
+
   let list = livePayments().filter((p) => filter === 'all' || !p.settled);
+  if (histPeriod === 'month') list = list.filter((p) => (p.date || '').startsWith(histMonth));
+  if (histPeriod === 'day') list = list.filter((p) => p.date === histDay);
   if (c) list = list.filter((p) => p.payer === c.payer && split(p)[c.owner] > 0);
   list.sort(byDateDesc);
   histVisible = list.map((p) => p.id);
   if (histSel) for (const id of [...histSel]) if (!histVisible.includes(id)) histSel.delete(id); // 絞り込みで見えなくなった分は外す
-  renderEntries($('#history-list'), list, c ? 'この分類の記録はありません' : '記録がありません', histSel, updateHistBulk);
+  // 金額は、分類で絞ったときはその分類の分だけを数える
+  const amt = (p) => (c ? split(p)[c.owner] : Number(p.total) || 0);
+  const where = histPeriod === 'month' ? monthLabel(histMonth) + 'の' : histPeriod === 'day' ? 'この日の' : '';
+  const dayHead = histPeriod === 'day' ? null : (d, items) => `<div class="day-head"><span>${esc(dayLabel(d))}</span>`
+    + `<span class="muted">${items.length}件 ${yen(items.reduce((x, p) => x + amt(p), 0))}</span></div>`;
+  renderEntries($('#history-list'), list, `${where}${c ? 'この分類の記録はありません' : '記録がありません'}`, histSel, updateHistBulk, dayHead);
   $('#btn-hist-select').textContent = histSel ? '完了' : '選択';
   $('#hist-select-tools').hidden = !histSel || !list.length;
   $('#hist-bulk').hidden = !histSel;
@@ -437,7 +489,7 @@ function renderHistory() {
   }
 
   // 絞り込み結果の合計。分類で絞ったときは、品目ごとに分けた記録のうちその分類の金額だけを数える
-  const total = list.reduce((x, p) => x + (c ? split(p)[c.owner] : Number(p.total) || 0), 0);
+  const total = list.reduce((x, p) => x + amt(p), 0);
   $('#history-summary').textContent = list.length ? `${list.length}件・${c ? 'この分類の金額' : '合計'} ${yen(total)}` : '';
 
   const sts = data.settlements.filter((s) => !s.deleted).sort((x, y) => y.date.localeCompare(x.date));
@@ -1829,6 +1881,10 @@ $('#m-prev').addEventListener('click', () => { curMonth = shiftMonth(curMonth, -
 $('#m-next').addEventListener('click', () => { curMonth = shiftMonth(curMonth, 1); mCell = null; renderMonthly(); });
 $('#m-list-clear').addEventListener('click', () => { mCell = null; renderMonthly(); });
 $('#history-filter').addEventListener('change', renderHistory);
+document.querySelectorAll('.hist-period button').forEach((b) => b.addEventListener('click', () => setHistPeriod(b.dataset.period)));
+$('#hist-prev').addEventListener('click', () => shiftHist(-1));
+$('#hist-next').addEventListener('click', () => shiftHist(1));
+$('#hist-day').addEventListener('change', (e) => { if (e.target.value) { histDay = e.target.value; renderHistory(); } });
 $('#history-cell').addEventListener('change', renderHistory);
 $('#btn-hist-select').addEventListener('click', () => { histSel = histSel ? null : new Set(); renderHistory(); });
 $('#btn-hist-all').addEventListener('click', () => {

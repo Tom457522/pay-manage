@@ -336,3 +336,11 @@ textarea { resize: vertical; font: inherit; line-height: 1.5; }
 .map-preview { margin: 4px 0 8px; }
 .map-row { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; font-size: 13px; padding: 4px 0; border-bottom: 1px solid var(--border); }
 .map-row span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 履歴の期間（全期間 / 月ごと / 日ごと） */
+.hist-period { margin-bottom: 8px; }
+.hist-nav { margin-bottom: 8px; }
+.hist-nav input[type=date] { width: auto; flex: 0 1 auto; margin: 0; text-align: center; }
+.day-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 13px; font-weight: 700; padding: 8px 2px 0; }
+.day-head:first-child { padding-top: 0; }
+.day-head .muted { font-weight: 400; font-variant-numeric: tabular-nums; }
